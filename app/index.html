@@ -75,6 +75,10 @@
       </div>
       <label class="sr-only" for="assistant-name">Assistant display name</label>
       <input class="assistant-name" id="assistant-name" maxlength="40" aria-label="Editable assistant name">
+      <label class="sr-only" for="analyzer-token">Analyzer access token</label>
+      <input class="assistant-name" id="analyzer-token" type="password" maxlength="256"
+        autocomplete="off" placeholder="Access token (only if your server requires one)"
+        aria-label="Analyzer access token">
       <div class="quick-prompts">
         <button class="prompt-chip" type="button" data-prompt="What am I looking at?">What am I looking at?</button>
         <button class="prompt-chip" type="button" data-prompt="Why is this dot moving?">Why is it moving?</button>
@@ -89,7 +93,7 @@
         <textarea id="chat-input" rows="2" maxlength="1000" placeholder="Ask about this target…" required></textarea>
         <button class="button button-primary send-button" type="submit" aria-label="Send question">↑</button>
       </form>
-      <p class="privacy-note">Only compact target metadata and recent chat turns are sent for analysis. Image pixels stay in this app.</p>
+      <p class="privacy-note">The access token is kept in this tab and sent only to your SPHEREx backend. Gemini receives only compact target metadata and recent chat turns; image pixels stay in this app.</p>
     </aside>
 
     <section class="spectrum-panel card" aria-labelledby="spectrum-title">

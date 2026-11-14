@@ -201,6 +201,7 @@ label { display: block; margin-bottom: .45rem; color: #c1ccda; font-size: .75rem
 .analyzer-heading { margin-bottom: .65rem; }
 .assistant-orb { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 50%; color: var(--color-cyan); background: var(--color-cyan-soft); }
 .assistant-name { margin-bottom: .7rem; padding: .5rem .65rem; color: var(--color-amber); font: 600 .68rem var(--font-mono); }
+.assistant-name::placeholder { color: var(--color-dim); font-weight: 400; }
 .quick-prompts { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .75rem; }
 .prompt-chip { padding: .32rem .5rem; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-muted); background: transparent; cursor: pointer; font-size: .61rem; }
 .prompt-chip:hover { color: var(--color-cyan); border-color: var(--color-border-strong); }

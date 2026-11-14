@@ -115,7 +115,9 @@ source .venv/bin/activate
 pip install numpy astropy astroquery fastapi uvicorn requests
 ```
 
-Optional Gemini setup: copy `.env.example` to `.env`, add your `GEMINI_API_KEY`, and set `AI_NAME` to customize the assistant label. The key stays on the backend; the frontend sends only target summary fields and recent chat turns to `/api/analyze`.
+Optional Gemini setup: copy `.env.example` to `.env`, add your `GEMINI_API_KEY`, and set `AI_NAME` to customize the assistant label. The key stays on the backend; the frontend sends only target summary fields and recent chat turns to `/api/analyze`. The `.env` file is Git-ignored; never commit or publish it.
+
+The backend listens on localhost by default. Keep it local for personal use. If you intentionally expose it remotely, configure a random `ANALYZER_ACCESS_TOKEN` (at least 32 characters) and an exact `CORS_ORIGINS` allowlist in the backend `.env`; generate a token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and enter it in the chat panel. Serve the app and API over HTTPS so the access token is encrypted in transit. The token is held only in the current browser tab. Analyzer and legacy explain requests are limited to 10/minute and 100/day per client IP. These in-process limits are a safety net, not a substitute for provider/gateway quotas in a multi-worker public deployment.
 
 ### Running Unit Tests
 ```bash

@@ -19,7 +19,7 @@ const elements = Object.fromEntries([
   "search-form", "target-query", "query-label", "search-help", "search-message", "preset-list",
   "target-summary", "data-source", "sky-canvas", "epoch-label", "observation-meta", "dot-hud",
   "blink-controls", "blink-toggle", "blink-speed", "blink-speed-value", "spectrum-canvas",
-  "chat-form", "chat-input", "chat-messages", "suggested-question", "assistant-name"
+  "chat-form", "chat-input", "chat-messages", "suggested-question", "assistant-name", "analyzer-token"
 ].map((id) => [id, document.getElementById(id)]));
 
 function setMessage(text, isError = false) {
@@ -360,9 +360,13 @@ async function askAnalyzer(prompt) {
   const submitButton = elements["chat-form"].querySelector("button");
   submitButton.disabled = true;
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (elements["analyzer-token"].value) {
+      headers["X-Analyzer-Token"] = elements["analyzer-token"].value;
+    }
     const result = await fetchJson(`${API_BASE}/api/analyze`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ prompt: question, target: activeTargetSummary(state.data), history })
     });
     addMessage("assistant", result.reply);

@@ -7,11 +7,16 @@ import os
 import sys
 import json
 import hashlib
+import ipaddress
 import re
 import requests
-from typing import Optional, Dict, Any, List, Literal
+import secrets
+import threading
+import time
+from collections import deque
+from typing import Optional, Dict, Any, List, Literal, Deque
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from astropy import units as u
@@ -54,6 +59,24 @@ if os.path.exists(ENV_PATH):
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 AI_NAME = os.getenv("AI_NAME", "SPHEREx Analyzer")
+ANALYZER_ACCESS_TOKEN = os.getenv("ANALYZER_ACCESS_TOKEN", "").strip()
+ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:8080,http://127.0.0.1:8080"
+    ).split(",")
+    if origin.strip()
+]
+if "*" in ALLOWED_ORIGINS:
+    raise ValueError("CORS_ORIGINS must list exact trusted origins; wildcard access is not allowed.")
+if ANALYZER_ACCESS_TOKEN and len(ANALYZER_ACCESS_TOKEN) < 32:
+    raise ValueError("ANALYZER_ACCESS_TOKEN must be at least 32 characters long.")
+
+ANALYZER_REQUESTS_PER_MINUTE = 10
+ANALYZER_REQUESTS_PER_DAY = 100
+_analyzer_request_times: Dict[str, Deque[float]] = {}
+_analyzer_request_lock = threading.Lock()
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -62,13 +85,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Analyzer-Token"],
 )
 
 
@@ -310,11 +332,79 @@ def _limit_words(text: str, max_words: int) -> str:
     return text if len(words) <= max_words else " ".join(words[:max_words])
 
 
+def _client_is_loopback(request: Request) -> bool:
+    if request.client is None:
+        return False
+    try:
+        return ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return False
+
+
+def _enforce_analyzer_access(request: Request, supplied_token: Optional[str]) -> None:
+    if ANALYZER_ACCESS_TOKEN:
+        if not supplied_token or not secrets.compare_digest(supplied_token, ANALYZER_ACCESS_TOKEN):
+            raise HTTPException(status_code=401, detail="A valid analyzer access token is required.")
+        return
+
+    if not _client_is_loopback(request):
+        raise HTTPException(
+            status_code=503,
+            detail="Remote analyzer access is disabled. Configure ANALYZER_ACCESS_TOKEN on the backend."
+        )
+
+
+def _enforce_gemini_rate_limit(request: Request) -> None:
+    client_host = request.client.host if request.client else "unknown"
+    now = time.time()
+    minute_ago = now - 60
+    day_ago = now - 86400
+
+    with _analyzer_request_lock:
+        timestamps = _analyzer_request_times.setdefault(client_host, deque())
+        while timestamps and timestamps[0] <= day_ago:
+            timestamps.popleft()
+
+        recent_count = sum(timestamp > minute_ago for timestamp in timestamps)
+        if recent_count >= ANALYZER_REQUESTS_PER_MINUTE:
+            retry_after = max(1, int(60 - (now - next(
+                timestamp for timestamp in timestamps if timestamp > minute_ago
+            ))))
+            raise HTTPException(
+                status_code=429,
+                detail="Analyzer rate limit reached. Try again shortly.",
+                headers={"Retry-After": str(retry_after)}
+            )
+        if len(timestamps) >= ANALYZER_REQUESTS_PER_DAY:
+            retry_after = max(1, int(86400 - (now - timestamps[0])))
+            raise HTTPException(
+                status_code=429,
+                detail="Analyzer daily request limit reached.",
+                headers={"Retry-After": str(retry_after)}
+            )
+
+        timestamps.append(now)
+        if len(_analyzer_request_times) > 1024:
+            expired = [
+                host for host, requests_for_host in _analyzer_request_times.items()
+                if not requests_for_host or requests_for_host[-1] <= day_ago
+            ]
+            for host in expired:
+                _analyzer_request_times.pop(host, None)
+
+
 @app.post("/api/analyze")
-def analyze_target(request: AnalyzeRequest):
-    target = compact_target_summary(request.target)
-    prompt = request.prompt.strip()
-    history = request.history[-4:]
+def analyze_target(
+    payload: AnalyzeRequest,
+    request: Request,
+    analyzer_token: Optional[str] = Header(default=None, alias="X-Analyzer-Token")
+):
+    _enforce_analyzer_access(request, analyzer_token)
+    _enforce_gemini_rate_limit(request)
+
+    target = compact_target_summary(payload.target)
+    prompt = payload.prompt.strip()
+    history = payload.history[-4:]
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
 
     if api_key:
@@ -340,9 +430,13 @@ def analyze_target(request: AnalyzeRequest):
             }
         }
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key
+        }
         try:
             response = requests.post(
-                url, params={"key": api_key}, json=payload, timeout=12
+                url, headers=headers, json=payload, timeout=12
             )
             response.raise_for_status()
             candidate_text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -370,17 +464,21 @@ def get_spectrum(object_type: str = Query("brown_dwarf", description="Astrophysi
 
 @app.get("/api/explain")
 def explain_target(
+    request: Request,
     target: str = Query(..., description="Target name or identifier"),
     object_type: Optional[str] = Query("unknown", description="Classification (e.g. brown_dwarf, red_dwarf)"),
     pm: Optional[float] = Query(0.0, description="Total proper motion in arcsec/yr"),
     optical_to_ir_ratio: Optional[float] = Query(None, description="Optical-to-IR flux ratio"),
-    is_gaia_match: Optional[bool] = Query(True, description="Whether an optical Gaia counterpart exists")
+    is_gaia_match: Optional[bool] = Query(True, description="Whether an optical Gaia counterpart exists"),
+    analyzer_token: Optional[str] = Header(default=None, alias="X-Analyzer-Token")
 ):
     """
     AI Astrobiology & Astrophysics narrative generator.
     Uses GEMINI_API_KEY from .env if available, or rich local astrophysics reasoning model.
     """
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
+    _enforce_analyzer_access(request, analyzer_token)
+    _enforce_gemini_rate_limit(request)
 
     # 1. Attempt Google Gemini API if API key is present
     if api_key:
@@ -399,8 +497,11 @@ def explain_target(
                 f"3. Science implication for the search for Planet X, brown dwarfs, or stellar evolution."
             )
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key
+            }
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.3, "maxOutputTokens": 600}

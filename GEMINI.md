@@ -54,7 +54,7 @@ SPHEREx Mission Visualizer/
     └── OBJECT_IDENTIFICATION_AND_SCIENCE_GUIDE.md  # Scientific classification tree & workflows
 ```
 
-The optional chat service is `POST /api/analyze`. It sends Google Gemini only a compact scalar target summary and up to four recent chat turns; image pixel arrays remain in the browser. Configure `GEMINI_API_KEY` and the backend assistant label `AI_NAME` in `.env`; the local analyzer fallback works without a key.
+The optional chat service is `POST /api/analyze`. It sends Google Gemini only a compact scalar target summary and up to four recent chat turns; image pixel arrays remain in the browser. Configure `GEMINI_API_KEY` and the backend assistant label `AI_NAME` in `.env`; the local analyzer fallback works without a key. Keep `.env` private and untracked. Remote analyzer access requires a backend-only `ANALYZER_ACCESS_TOKEN`, an exact `CORS_ORIGINS` allowlist, and HTTPS; requests are rate-limited per client IP.
 
 ---
 
