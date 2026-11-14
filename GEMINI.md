@@ -97,3 +97,4 @@ Open `http://localhost:8080` in your web browser.
 - Select any preset chip (e.g., Barnard's Star, WISE 0855-0714).
 - Switch between **Single Epoch**, **Blink Comparator**, and **Difference Imaging**.
 - Click anywhere on the canvas to inspect celestial targets and review the Object Identification HUD.
+

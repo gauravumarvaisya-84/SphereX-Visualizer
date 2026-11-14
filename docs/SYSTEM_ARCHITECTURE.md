@@ -104,3 +104,4 @@ The state of the visualizer is synchronized in real time with the browser URL us
   - `single`: Single-epoch calibrated infrared frame.
   - `blink`: Multi-epoch cycling comparator (1–8 fps).
   - `diff`: Sub-pixel difference matrix ($Epoch_2 - Epoch_1$).
+

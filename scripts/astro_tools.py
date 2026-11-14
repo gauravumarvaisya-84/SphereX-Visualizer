@@ -407,3 +407,4 @@ def generate_spherex_spectral_profile(object_type: str) -> Dict[str, Any]:
         "detector_arrays": arrays,
         "absorption_features": features
     }
+

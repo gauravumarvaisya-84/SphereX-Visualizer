@@ -543,3 +543,4 @@ if __name__ == "__main__":
         precache_custom_target(query)
     else:
         precache_all_benchmark_targets()
+

@@ -67,3 +67,4 @@ All sprint milestones were planned, tracked, and executed during the 48-hour glo
 ### Quarter 3: Citizen Science & Zooniverse Integration
 - Export vetted candidate lists directly to Zooniverse / Planet Hunters formats for crowd-sourced verification.
 - Add user annotations, bookmarking, and public candidate registration ledger.
+

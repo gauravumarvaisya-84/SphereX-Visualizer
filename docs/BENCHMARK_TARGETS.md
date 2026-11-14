@@ -102,3 +102,4 @@ To validate the SPHEREx Visualizer & Object Identifier across the diverse range 
 - **Distance:** $d \approx 644\,\text{pc}$ ($2,100\,\text{ly}$)
 - **Difference Imaging Signature:**
   Because the SPHEREx survey cadence is $\sim 182.5\,\text{days}$ ($\approx 0.74 \times P$), R Draconis is sampled at alternating phases between maximum light and deep minimum. This produces alternating massive unipolar residuals across SPHEREx Arrays 1–4.
+

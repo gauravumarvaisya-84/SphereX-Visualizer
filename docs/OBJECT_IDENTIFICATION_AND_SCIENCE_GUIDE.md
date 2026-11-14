@@ -77,3 +77,4 @@ Check Proper Motion:         Inspect 102-Band SED:
 ### Step 5: Generate AI Astrophysical Report
 1. Click the **Generate Deep Science Report (Gemini AI)** button.
 2. The AI astrobiologist will synthesize the astrometric kinematics, molecular profile, and planetary implications into a judge-ready scientific dossier.
+
