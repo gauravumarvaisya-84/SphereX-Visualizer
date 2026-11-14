@@ -1,11 +1,11 @@
-# GEMINI.md - SphereX Visualizer & Object Identifier
+# GEMINI.md - SPHEREx Mission Visualizer
 **Team Pioneer Matrix — NASA Space Apps Challenge 2026**
 **Challenge Focus:** Planet X and SPHEREx (Spectro-Photometer for the History of the Universe, Epoch of Reionization, and Ices Explorer)
 
 ---
 
 ## 1. Project Overview & Science Objectives
-The **SphereX Visualizer & Object Identifier** is an astronomical analysis tool and interactive mission-control dashboard developed by Team **Pioneer Matrix** for the NASA Space Apps Challenge 2026.
+The **SPHEREx Mission Visualizer** is an astronomical analysis tool and interactive mission-control dashboard developed by Team **Pioneer Matrix** for the NASA Space Apps Challenge 2026.
 
 SPHEREx scans the entire celestial sphere every 6 months across 102 near-infrared spectral bands (0.75–5.0 µm) utilizing 6 Linear Variable Filter (LVF) detector arrays. This mission is uniquely positioned to uncover undiscovered solar system objects (Planet X / Kuiper Belt Objects), ultra-cool Y/T-type brown dwarfs, high-proper-motion stellar neighbors, and infrared transient/variable phenomena.
 
@@ -22,7 +22,7 @@ SPHEREx scans the entire celestial sphere every 6 months across 102 near-infrare
 ## 2. Repository Architecture & Directory Layout
 
 ```
-SphereX/
+SPHEREx Mission Visualizer/
 ├── .gitignore                      # Git ignore file (.env, .venv, caches)
 ├── LICENSE                         # MIT License (Pioneer Matrix Team 2026)
 ├── GEMINI.md                       # Comprehensive system architecture & developer guide
@@ -42,7 +42,9 @@ SphereX/
 │   ├── fetch_all_targets.py        # IRSA TAP query scraper & CLI pre-cacher
 │   └── server.py                   # FastAPI backend with CORS, caching, and Gemini API explain
 ├── app/
-│   ├── index.html                  # Sleek single-page HTML5 Canvas mission-control interface
+│   ├── index.html                  # Mission-control page structure
+│   ├── styles.css                  # Dark observatory design system
+│   ├── app.js                      # Canvas views, target lookup, SED and analyzer chat
 │   └── package.json                # Frontend metadata and scripts
 └── docs/
     ├── PROJECT_PLAN.md             # 48-hour sprint log, milestones & post-hackathon roadmap
@@ -51,6 +53,8 @@ SphereX/
     ├── DATA_SOURCES.md             # IRSA, CDS Sesame, Gaia DR3, CatWISE & Nominatim specs
     └── OBJECT_IDENTIFICATION_AND_SCIENCE_GUIDE.md  # Scientific classification tree & workflows
 ```
+
+The optional chat service is `POST /api/analyze`. It sends Google Gemini only a compact scalar target summary and up to four recent chat turns; image pixel arrays remain in the browser. Configure `GEMINI_API_KEY` and the backend assistant label `AI_NAME` in `.env`; the local analyzer fallback works without a key.
 
 ---
 
@@ -97,4 +101,3 @@ Open `http://localhost:8080` in your web browser.
 - Select any preset chip (e.g., Barnard's Star, WISE 0855-0714).
 - Switch between **Single Epoch**, **Blink Comparator**, and **Difference Imaging**.
 - Click anywhere on the canvas to inspect celestial targets and review the Object Identification HUD.
-

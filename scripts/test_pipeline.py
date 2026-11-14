@@ -55,8 +55,8 @@ def test_coordinate_parsing_and_roundtrips():
     assert abs(parse_ra_to_deg("17:57:48.50") - 269.452083) < 0.001
     assert abs(parse_dec_to_deg("+04:41:36.2") - 4.693389) < 0.001
 
-    print("  ✓ Decimal and Sexagesimal coordinate parsing passed.")
-    print("  ✓ Coordinate roundtrip tests passed.")
+    print("  [PASS] Decimal and Sexagesimal coordinate parsing passed.")
+    print("  [PASS] Coordinate roundtrip tests passed.")
 
 
 def test_six_month_proper_motion_shifts():
@@ -92,7 +92,7 @@ def test_six_month_proper_motion_shifts():
         assert 0.0 <= new_ra < 360.0
         assert -90.0 <= new_dec <= 90.0
 
-        print(f"  ✓ {target['name']}: 6-month shift = {shift_arcsec:.3f}\" (expected {expected_shift_arcsec:.3f}\")")
+        print(f"  [PASS] {target['name']}: 6-month shift = {shift_arcsec:.3f}\" (expected {expected_shift_arcsec:.3f}\")")
 
 
 def test_image_difference_dipole_behavior():
@@ -133,7 +133,7 @@ def test_image_difference_dipole_behavior():
     assert abs(neg_x - 60.0) < 1.5, f"Neg center X: {neg_x}"
     assert abs(pos_y - 64.0) < 1.5, f"Pos center Y: {pos_y}"
 
-    print(f"  ✓ Difference image cancelled static stars. Dipole detected: pos=({pos_x:.1f}, {pos_y:.1f}), neg=({neg_x:.1f}, {neg_y:.1f})")
+    print(f"  [PASS] Difference image cancelled static stars. Dipole detected: pos=({pos_x:.1f}, {pos_y:.1f}), neg=({neg_x:.1f}, {neg_y:.1f})")
 
 
 def test_spherex_spectral_profiles():
@@ -168,12 +168,12 @@ def test_spherex_spectral_profiles():
             assert any("CH4" in m for m in mol_names), "Brown dwarf missing CH4 methane signature"
             assert any("H2O" in m for m in mol_names), "Brown dwarf missing H2O signature"
 
-        print(f"  ✓ {obj_type}: 102 spectral bands synthesized (0.75 to 5.00 µm) with {len(features)} molecular diagnostic markers.")
+        print(f"  [PASS] {obj_type}: 102 spectral bands synthesized (0.75 to 5.00 µm) with {len(features)} molecular diagnostic markers.")
 
 
 def run_all_tests():
     print("=" * 60)
-    print("SphereX Visualizer & Math Engine Test Suite")
+    print("SPHEREx Mission Visualizer Math Engine Test Suite")
     print("Team Pioneer Matrix - NASA Space Apps Challenge 2026")
     print("=" * 60)
 
@@ -189,4 +189,3 @@ def run_all_tests():
 
 if __name__ == "__main__":
     run_all_tests()
-

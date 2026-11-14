@@ -1,4 +1,4 @@
-# SPHEREx Visualizer & Object Identifier
+# SPHEREx Mission Visualizer
 ### Team Pioneer Matrix &bull; NASA Space Apps Challenge 2026
 **Challenge:** Planet X and SPHEREx (Spectro-Photometer for the History of the Universe, Epoch of Reionization, and Ices Explorer)
 
@@ -13,7 +13,7 @@
 
 ## 1. Executive Summary & Mission Overview
 
-The **SPHEREx Visualizer & Object Identifier** is an astronomical analysis tool and mission-control platform engineered by **Team Pioneer Matrix** for the 2026 NASA Space Apps Challenge. 
+The **SPHEREx Mission Visualizer** is an astronomical analysis tool and mission-control platform engineered by **Team Pioneer Matrix** for the 2026 NASA Space Apps Challenge.
 
 NASA's **SPHEREx** mission surveys the entire celestial sphere every six months across **102 near-infrared spectral channels** ($0.75 - 5.0\,\mu\text{m}$) using six Linear Variable Filter (LVF) detector arrays. This bi-annual cadence and wide spectral grasp provides an unprecedented opportunity to discover:
 1. **Hypothetical Outer Solar System Bodies (Planet X / Trans-Neptunian Objects):** High-albedo infrared emitters exhibiting significant transverse parallax and proper motion between 6-month epochs.
@@ -21,7 +21,7 @@ NASA's **SPHEREx** mission surveys the entire celestial sphere every six months 
 3. **High Proper-Motion Stellar Neighbors:** Nearby low-mass stars (M-dwarfs) shifting several arcseconds per year.
 4. **Infrared Flux Variables & Occultations:** Young stellar objects (T Tauri) and pulsating asymptotic giant branch stars (Miras).
 
-Our platform combines a **live Caltech/IPAC IRSA TAP scraper**, a **sub-pixel image differencing engine**, a **multi-epoch blink comparator (1–8 fps)**, a **102-band spectral energy distribution (SED) diagnostic tool**, and an **AI astrophysics explainer powered by Google Gemini**.
+Our platform combines a **live Caltech/IPAC IRSA TAP scraper**, a **sub-pixel image differencing engine**, a **multi-epoch blink comparator (1–8 fps)**, a **102-band spectral energy distribution (SED) diagnostic tool**, and **SPHEREx Analyzer**, an adaptive astronomy assistant powered by Google Gemini when configured.
 
 ---
 
@@ -87,7 +87,7 @@ Our system comes pre-configured with 5 official benchmark targets covering the f
          |  - Canvas 2: 102-Band SED across Arrays 1-6 with Molecular Notches      |
          |  - Interactive Target Reticle & Proper Motion Vector Arrow              |
          |  - Object Identification HUD (Gaia DR3 vs. UNCATALOGED Candidate)      |
-         |  - Gemini AI Explainer Integration (/api/explain)                       |
+         |  - SPHEREx Analyzer Integration (POST /api/analyze)                    |
          +-------------------------------------------------------------------------+
 ```
 
@@ -101,8 +101,7 @@ Our system comes pre-configured with 5 official benchmark targets covering the f
 
 ### Installation
 ```bash
-# 1. Clone or navigate to the repository
-cd SpaceTex/SphereX
+# Run these commands from the repository root
 
 # 2. Create and activate a Python virtual environment
 python -m venv .venv
@@ -115,6 +114,8 @@ source .venv/bin/activate
 # 3. Install required astronomical and backend packages
 pip install numpy astropy astroquery fastapi uvicorn requests
 ```
+
+Optional Gemini setup: copy `.env.example` to `.env`, add your `GEMINI_API_KEY`, and set `AI_NAME` to customize the assistant label. The key stays on the backend; the frontend sends only target summary fields and recent chat turns to `/api/analyze`.
 
 ### Running Unit Tests
 ```bash
@@ -148,7 +149,7 @@ Open your browser to: **`http://localhost:8080`**
 ## 6. Project Directory Layout
 
 ```
-SphereX/
+SPHEREx Mission Visualizer/
 ├── .gitignore                      # Git exclusion rules
 ├── LICENSE                         # MIT License
 ├── GEMINI.md                       # LLM agent context & project guide
@@ -168,7 +169,9 @@ SphereX/
 │   ├── fetch_all_targets.py        # IRSA TAP query scraper & CLI pre-cacher
 │   └── server.py                   # FastAPI backend with CORS, caching, and Gemini API explain
 ├── app/
-│   ├── index.html                  # Sleek single-page HTML5 Canvas mission-control interface
+│   ├── index.html                  # Mission-control page structure
+│   ├── styles.css                  # Dark observatory design system
+│   ├── app.js                      # Canvas views, target lookup, SED and analyzer chat
 │   └── package.json                # Frontend metadata and scripts
 └── docs/
     ├── PROJECT_PLAN.md             # 48-hour sprint log, milestones & post-hackathon roadmap
@@ -183,4 +186,3 @@ SphereX/
 ## 7. License & Attribution
 Developed with pride by **Team Pioneer Matrix** for the **NASA Space Apps Challenge 2026**.  
 Distributed under the **MIT License**.
-

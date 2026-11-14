@@ -1,5 +1,5 @@
 """
-FastAPI Server & REST API for SphereX Visualizer
+FastAPI Server & REST API for SPHEREx Mission Visualizer
 Team Pioneer Matrix - NASA Space Apps Challenge 2026
 """
 
@@ -7,12 +7,16 @@ import os
 import sys
 import json
 import hashlib
+import re
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Literal
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from astropy import units as u
+from astropy.coordinates import AltAz, EarthLocation, ICRS
+from astropy.time import Time
 
 # Ensure scripts directory in path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -49,10 +53,11 @@ if os.path.exists(ENV_PATH):
                 os.environ[k.strip()] = v.strip().strip('"').strip("'")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+AI_NAME = os.getenv("AI_NAME", "SPHEREx Analyzer")
 
 # Initialize FastAPI App
 app = FastAPI(
-    title="SphereX Visualizer & Object Identifier API",
+    title="SPHEREx Mission Visualizer API",
     description="Backend Astrometry, Live Scraper, and Spectral Engine for NASA Space Apps Challenge 2026",
     version="1.0.0"
 )
@@ -77,7 +82,7 @@ def root():
             "/api/sky?q=<query>&size_deg=0.05&bandpass=SPHEREx-D2",
             "/api/targets",
             "/api/spectrum?object_type=<type>",
-            "/api/explain?target=<name>&object_type=<type>"
+            "/api/analyze"
         ]
     }
 
@@ -94,7 +99,8 @@ def get_sky_cutout(
     q: str = Query(..., description="Target name, RA/Dec coordinates, or Earth city/address"),
     size_deg: float = Query(0.05, ge=0.01, le=0.5, description="Field of view size in degrees"),
     bandpass: str = Query("SPHEREx-D2", description="SPHEREx bandpass (SPHEREx-D1 to D6)"),
-    max_epochs: int = Query(3, ge=1, le=6, description="Number of survey epochs")
+    max_epochs: int = Query(3, ge=1, le=6, description="Number of survey epochs"),
+    input_mode: Literal["sky", "earth"] = Query("sky", description="Interpret coordinates as sky or Earth coordinates")
 ):
     """
     Search and retrieve multi-epoch SPHEREx calibrated cutouts for any input query.
@@ -106,9 +112,16 @@ def get_sky_cutout(
     query_str = q.strip()
 
     # 1. Check if query matches a pre-cached benchmark target file
-    clean_q = query_str.lower().replace("-", "_").replace(" ", "_")
-    benchmark_file = os.path.join(CUTOUTS_DIR, f"{clean_q}.json")
-    if os.path.exists(benchmark_file):
+    clean_q = re.sub(r"[^a-z0-9]", "", query_str.lower())
+    benchmark_file = None
+    for target in load_benchmark_targets():
+        target_names = (target.get("id", ""), target.get("name", ""))
+        if any(clean_q == re.sub(r"[^a-z0-9]", "", value.lower()) for value in target_names):
+            candidate = os.path.join(CUTOUTS_DIR, f"{target['id']}.json")
+            if os.path.isfile(candidate):
+                benchmark_file = candidate
+                break
+    if benchmark_file and os.path.exists(benchmark_file):
         try:
             with open(benchmark_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -118,7 +131,7 @@ def get_sky_cutout(
             pass
 
     # 2. Check MD5 cache in live_cache
-    cache_key = hashlib.md5(f"{query_str}_{size_deg:.4f}_{bandpass}_{max_epochs}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"{input_mode}_{query_str}_{size_deg:.4f}_{bandpass}_{max_epochs}".encode()).hexdigest()
     cache_file = os.path.join(LIVE_CACHE_DIR, f"{cache_key}.json")
 
     if os.path.exists(cache_file):
@@ -132,7 +145,9 @@ def get_sky_cutout(
 
     # 3. Resolve target coordinates from input
     try:
-        resolved = resolve_any_input(query_str)
+        resolved = resolve_earth_lat_lon(query_str) if input_mode == "earth" else resolve_any_input(query_str)
+        if input_mode == "earth" and resolved is None:
+            resolved = resolve_any_input(query_str)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Target resolution error: {str(e)}")
 
@@ -145,7 +160,9 @@ def get_sky_cutout(
             max_epochs=max_epochs,
             grid_size=128
         )
-        cutout_data["cache_status"] = "live_processed"
+        cutout_data["cache_status"] = (
+            "live_processed" if cutout_data.get("source") == "irsa_live_tap" else "simulated_fallback"
+        )
 
         # Save to live_cache
         try:
@@ -157,6 +174,192 @@ def get_sky_cutout(
         return cutout_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate SPHEREx data: {str(e)}")
+
+
+def resolve_earth_lat_lon(query: str) -> Optional[Dict[str, Any]]:
+    """Convert a numeric Earth latitude/longitude pair to its current zenith."""
+    parts = [part.strip() for part in re.split(r"[,;\s]+", query.strip()) if part.strip()]
+    if len(parts) != 2:
+        return None
+    try:
+        latitude, longitude = map(float, parts)
+    except ValueError:
+        return None
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError("Earth coordinates must be latitude [-90, 90], longitude [-180, 180].")
+
+    now = Time.now()
+    location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg)
+    zenith = AltAz(alt=90 * u.deg, az=0 * u.deg, obstime=now, location=location)
+    sky = zenith.transform_to(ICRS())
+    ra_deg, dec_deg = float(sky.ra.deg), float(sky.dec.deg)
+    return {
+        "target_id": "earth_zenith",
+        "name": f"Zenith at {latitude:.4f}, {longitude:.4f}",
+        "ra_deg": ra_deg,
+        "dec_deg": dec_deg,
+        "pm_ra_mas_yr": 0.0,
+        "pm_dec_mas_yr": 0.0,
+        "total_pm_arcsec_yr": 0.0,
+        "spectral_type": "Zenith Field",
+        "object_type": "overhead_sky",
+        "earth_lat": latitude,
+        "earth_lon": longitude,
+        "observation_time_utc": str(now.iso),
+        "description": "Current sky coordinates at the zenith for the supplied Earth location.",
+        "source": "earth_lat_lon"
+    }
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=1000)
+
+
+class AnalyzeRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1000)
+    target: Dict[str, Any] = Field(default_factory=dict)
+    history: List[ChatTurn] = Field(default_factory=list)
+
+
+ANALYZER_SYSTEM_PROMPT = """You are {ai_name}, an adaptive SPHEREx astronomy guide.
+Use only the compact active-target summary and the conversation supplied. Do not invent measurements, catalogs, or detections.
+For casual questions, answer in plain English in 2–3 crisp sentences using the target's real numbers, then provide an intriguing curiosity-hook question.
+For technical questions about proper motion, spectral bands, Gaia/IR ratios, or difference images, answer with precise astrophysical depth and provide a deeper investigative next question.
+Return only JSON with exactly these string fields: {"reply":"...","suggested_question":"..."}.
+Keep reply below 120 words. Treat 4.26 microns as the CO2 feature region; do not claim a measured peak unless the supplied data says one was measured."""
+
+
+def compact_target_summary(target: Dict[str, Any]) -> Dict[str, Any]:
+    """Whitelist scalar fields so images and other large payloads never reach Gemini."""
+    name = str(target.get("name") or "Unknown target")[:80]
+    ratio = target.get("optical_ir_ratio")
+    try:
+        ratio = float(ratio) if ratio is not None else None
+    except (TypeError, ValueError):
+        ratio = None
+    try:
+        proper_motion = float(target.get("proper_motion") or 0)
+    except (TypeError, ValueError):
+        proper_motion = 0.0
+    try:
+        wavelength = float(target.get("wavelength_um")) if target.get("wavelength_um") is not None else None
+    except (TypeError, ValueError):
+        wavelength = None
+    try:
+        epoch_count = max(0, min(6, int(target.get("epoch_count") or 0)))
+    except (TypeError, ValueError):
+        epoch_count = 0
+    return {
+        "name": name,
+        "ra_deg": _compact_number(target.get("ra_deg")),
+        "dec_deg": _compact_number(target.get("dec_deg")),
+        "proper_motion": proper_motion,
+        "optical_ir_ratio": ratio,
+        "wavelength_um": wavelength,
+        "epoch_count": epoch_count,
+        "discovery_status": str(target.get("discovery_status") or "unverified")[:40]
+    }
+
+
+def _compact_number(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_analysis(prompt: str, target: Dict[str, Any]) -> Dict[str, str]:
+    name = target["name"]
+    motion = target["proper_motion"]
+    ratio = target["optical_ir_ratio"]
+    wavelength = target["wavelength_um"]
+    low = prompt.lower()
+    deep = any(term in low for term in ("ratio", "proper motion", "vector", "dipole", "absorption", "band", "um", "µm", "gaia", "epoch"))
+
+    if deep:
+        ratio_match = re.search(r"(?:ratio|optical.to.ir)[^0-9]{0,30}([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?)", low)
+        wave_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:um|µm|microns?)", low)
+        if ratio_match:
+            ratio = float(ratio_match.group(1))
+        if wave_match:
+            wavelength = float(wave_match.group(1))
+        ratio_text = f"{ratio:g}" if ratio is not None else "not measured in the active summary"
+        wavelength_text = f"{wavelength:g} µm" if wavelength is not None else "not specified"
+        reply = (
+            f"{name} has a proper motion of {motion:g} arcsec/year across {target['epoch_count']} epoch(s). "
+            f"The optical-to-IR ratio is {ratio_text}; a value of 0.001 means optical flux is about one-thousandth "
+            "of the infrared measure, consistent with an IR-dominated source but not proof of a new object. "
+            f"{wavelength_text} is near the 4.26 µm CO2 feature region; a reported peak there needs continuum and calibration checks, "
+            "since CO2 is generally diagnosed by absorption."
+        )
+        question = "Can we compare the neighboring bands and epoch-to-epoch flux to distinguish a real feature from calibration or variability?"
+    else:
+        reply = (
+            f"This is {name}, centered at RA {target['ra_deg'] if target['ra_deg'] is not None else 'unknown'}° "
+            f"and Dec {target['dec_deg'] if target['dec_deg'] is not None else 'unknown'}°. "
+            f"It moves at about {motion:g} arcsec per year; the canvas compares {target['epoch_count']} observation epoch(s) "
+            "to help reveal motion or brightness changes."
+        )
+        question = "Want to see how its motion leaves a positive-and-negative footprint in the difference view?"
+    return {"reply": _limit_words(reply, 119), "suggested_question": question}
+
+
+def _limit_words(text: str, max_words: int) -> str:
+    words = text.split()
+    return text if len(words) <= max_words else " ".join(words[:max_words])
+
+
+@app.post("/api/analyze")
+def analyze_target(request: AnalyzeRequest):
+    target = compact_target_summary(request.target)
+    prompt = request.prompt.strip()
+    history = request.history[-4:]
+    api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
+
+    if api_key:
+        contents = []
+        for turn in history:
+            contents.append({
+                "role": "user" if turn.role == "user" else "model",
+                "parts": [{"text": turn.content[:1000]}]
+            })
+        contents.append({
+            "role": "user",
+            "parts": [{
+                "text": f"Active target summary: {json.dumps(target, separators=(',', ':'))}\nQuestion: {prompt}"
+            }]
+        })
+        payload = {
+            "system_instruction": {"parts": [{"text": ANALYZER_SYSTEM_PROMPT.replace("{ai_name}", AI_NAME)}]},
+            "contents": contents,
+            "generationConfig": {
+                "temperature": 0.35,
+                "maxOutputTokens": 220,
+                "responseMimeType": "application/json"
+            }
+        }
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        try:
+            response = requests.post(
+                url, params={"key": api_key}, json=payload, timeout=12
+            )
+            response.raise_for_status()
+            candidate_text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            result = json.loads(candidate_text)
+            reply = str(result["reply"]).strip()
+            suggested_question = str(result["suggested_question"]).strip()
+            if len(reply.split()) > 119 or not suggested_question:
+                raise ValueError("Gemini response did not meet the analyzer response format.")
+            return {
+                "reply": reply,
+                "suggested_question": suggested_question
+            }
+        except (requests.RequestException, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
+            print(f"Gemini analysis unavailable ({type(error).__name__}); using the local analyzer.")
+
+    result = _local_analysis(prompt, target)
+    return result
 
 
 @app.get("/api/spectrum")
@@ -296,4 +499,3 @@ def explain_target(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
-
