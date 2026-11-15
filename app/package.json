@@ -1,0 +1,20 @@
+{
+  "name": "spherex-mission-visualizer",
+  "version": "1.0.0",
+  "description": "SPHEREx Mission Visualizer for Team Pioneer Matrix - NASA Space Apps Challenge 2026",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8080 --directory .",
+    "serve": "python -m http.server 8080 --directory ."
+  },
+  "keywords": [
+    "nasa-space-apps-2026",
+    "spherex",
+    "planet-x",
+    "infrared-astronomy",
+    "brown-dwarfs",
+    "blink-comparator"
+  ],
+  "author": "Pioneer Matrix Team",
+  "license": "MIT"
+}

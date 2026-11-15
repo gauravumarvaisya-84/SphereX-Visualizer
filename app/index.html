@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070a10">
+  <title>SPHEREx Mission Visualizer</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="SPHEREx Mission Visualizer home">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <span><strong>SPHEREx</strong><small>MISSION VISUALIZER</small></span>
+    </a>
+    <div class="mission-status"><span class="status-dot"></span> OBSERVATORY ONLINE</div>
+  </header>
+
+  <main class="layout">
+    <section class="search-panel card" aria-labelledby="search-title">
+      <div class="eyebrow">TARGET RESOLUTION</div>
+      <h1 id="search-title">Explore the infrared sky</h1>
+      <p class="muted">Resolve a sky target or point the observatory at an Earth location.</p>
+      <div class="segmented" role="group" aria-label="Coordinate input type">
+        <button class="segment active" type="button" data-input-mode="sky" aria-pressed="true">Sky RA / Dec</button>
+        <button class="segment" type="button" data-input-mode="earth" aria-pressed="false">Earth location</button>
+      </div>
+      <form id="search-form">
+        <label for="target-query" id="query-label">Target name or RA, Dec</label>
+        <div class="search-row">
+          <input id="target-query" name="q" autocomplete="off" value="Barnard's Star"
+            placeholder="Barnard's Star, M101, or 269.452083, 4.693389" required>
+          <button class="button button-primary" type="submit">Observe <span aria-hidden="true">→</span></button>
+        </div>
+        <p id="search-help" class="field-help">Decimal or sexagesimal coordinates, star and galaxy names.</p>
+      </form>
+      <div class="preset-area">
+        <div class="eyebrow">BENCHMARK TARGETS</div>
+        <div id="preset-list" class="preset-list" aria-label="Benchmark targets"></div>
+      </div>
+      <div class="search-message" id="search-message" role="status" aria-live="polite"></div>
+      <div class="target-summary" id="target-summary" hidden></div>
+    </section>
+
+    <section class="visual-panel card" aria-labelledby="visual-title">
+      <div class="panel-heading">
+        <div><div class="eyebrow">MULTI-EPOCH OBSERVATIONS</div><h2 id="visual-title">Sky cutout</h2></div>
+        <span class="pill" id="data-source">WAITING FOR TARGET</span>
+      </div>
+      <div class="view-tabs" role="tablist" aria-label="Sky image mode">
+        <button class="view-tab active" type="button" data-view="single" role="tab" aria-selected="true">Single Epoch</button>
+        <button class="view-tab" type="button" data-view="blink" role="tab" aria-selected="false">Blink Comparator</button>
+        <button class="view-tab" type="button" data-view="difference" role="tab" aria-selected="false">Difference E2 − E1</button>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="sky-canvas" width="128" height="128" aria-label="SPHEREx infrared sky image"></canvas>
+        <div class="canvas-label" id="epoch-label">Awaiting observations</div>
+        <div class="canvas-hint">CLICK A PIXEL TO IDENTIFY</div>
+      </div>
+      <div class="blink-row" id="blink-controls" hidden>
+        <button class="button button-secondary" id="blink-toggle" type="button">Pause</button>
+        <label for="blink-speed">Blink speed <output id="blink-speed-value">2 fps</output></label>
+        <input id="blink-speed" type="range" min="1" max="8" value="2">
+      </div>
+      <div class="observation-meta" id="observation-meta">Load a target to render its epochs.</div>
+      <div class="dot-hud" id="dot-hud" aria-live="polite">Dot View: click the image to inspect a sky position.</div>
+    </section>
+
+    <aside class="analyzer-panel card" aria-labelledby="analyzer-title">
+      <div class="panel-heading analyzer-heading">
+        <div><div class="eyebrow">MISSION ASSISTANT</div><h2 id="analyzer-title"></h2></div>
+        <span class="assistant-orb" aria-hidden="true">✦</span>
+      </div>
+      <label class="sr-only" for="assistant-name">Assistant display name</label>
+      <input class="assistant-name" id="assistant-name" maxlength="40" aria-label="Editable assistant name">
+      <label class="sr-only" for="analyzer-token">Analyzer access token</label>
+      <input class="assistant-name" id="analyzer-token" type="password" maxlength="256"
+        autocomplete="off" placeholder="Access token (only if your server requires one)"
+        aria-label="Analyzer access token">
+      <div class="quick-prompts">
+        <button class="prompt-chip" type="button" data-prompt="What am I looking at?">What am I looking at?</button>
+        <button class="prompt-chip" type="button" data-prompt="Why is this dot moving?">Why is it moving?</button>
+        <button class="prompt-chip" type="button" data-prompt="What can the spectrum tell us?">Read the spectrum</button>
+      </div>
+      <div class="chat-messages" id="chat-messages" aria-live="polite">
+        <div class="chat-message assistant-message"><span class="message-author"></span><p>Choose a target and ask me what the observations reveal.</p></div>
+      </div>
+      <div id="suggested-question" class="suggested-question"></div>
+      <form id="chat-form" class="chat-form">
+        <label class="sr-only" for="chat-input">Ask SPHEREx Analyzer</label>
+        <textarea id="chat-input" rows="2" maxlength="1000" placeholder="Ask about this target…" required></textarea>
+        <button class="button button-primary send-button" type="submit" aria-label="Send question">↑</button>
+      </form>
+      <p class="privacy-note">The access token is kept in this tab and sent only to your SPHEREx backend. Gemini receives only compact target metadata and recent chat turns; image pixels stay in this app.</p>
+    </aside>
+
+    <section class="spectrum-panel card" aria-labelledby="spectrum-title">
+      <div class="panel-heading">
+        <div><div class="eyebrow">SPECTRAL DIAGNOSTICS</div><h2 id="spectrum-title">102-Band SED</h2></div>
+        <span class="pill">0.75–5.0 µm</span>
+      </div>
+      <canvas id="spectrum-canvas" width="900" height="240" aria-label="102-band spectral energy distribution"></canvas>
+      <div class="spectrum-legend"><span><i class="legend-line"></i> Relative flux</span><span>H₂O · CH₄ · CO₂ diagnostic regions</span></div>
+    </section>
+  </main>
+  <footer>SPHEREx Mission Visualizer <span>·</span> Multi-epoch data exploration prototype</footer>
+</body>
+</html>
