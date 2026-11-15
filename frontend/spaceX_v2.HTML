@@ -1,0 +1,2050 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pioneer Matrix · SPHEREx Mission Visualizer</title>
+  <!-- Tailwind CDN & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- NASA / Space Editorial Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            'canvas-dark': '#0A0A0B',
+            'panel-dark': '#121214',
+            'panel-elevated': '#18181B',
+            'border-dark': '#222226',
+            'text-primary': '#F4F4F6',
+            'text-muted': '#8E8E93',
+            'cyan-reticle': '#06B6D4',
+            'amber-candidate': '#F59E0B',
+            'deep-blue': '#0F4C81',
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            orbitron: ['"Orbitron"', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      overflow-y: auto;
+      background: #0A0A0B;
+      color: #F4F4F6;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .hairline { border: 1px solid #222226; }
+    .btn {
+      transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+                  border-color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+                  color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .btn:hover { background-color: #1a1a1e; }
+    input[type=range] { accent-color: #06B6D4; }
+
+    /* Collapsible Sliding Sidebar */
+    #sideNav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 260px;
+      background: #121214;
+      border-right: 1px solid #222226;
+      z-index: 50;
+      transform: translateX(0);
+      transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+    #sideNav.collapsed {
+      transform: translateX(-100%);
+    }
+
+    /* Main Content Wrapper - Shifts when sidebar toggles */
+    #mainWrapper {
+      margin-left: 260px;
+      transition: margin-left 250ms cubic-bezier(0.16, 1, 0.3, 1);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #mainWrapper.expanded {
+      margin-left: 0;
+    }
+
+
+    /* Precision Reticle on Canvas */
+    #reticleBox {
+      position: absolute;
+      pointer-events: none;
+      display: none;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
+      z-index: 20;
+    }
+    .reticle-corner {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-color: #06B6D4;
+    }
+    .reticle-tl { top: 0; left: 0; border-top: 2px solid #06B6D4; border-left: 2px solid #06B6D4; }
+    .reticle-tr { top: 0; right: 0; border-top: 2px solid #06B6D4; border-right: 2px solid #06B6D4; }
+    .reticle-bl { bottom: 0; left: 0; border-bottom: 2px solid #06B6D4; border-left: 2px solid #06B6D4; }
+    .reticle-br { bottom: 0; right: 0; border-bottom: 2px solid #06B6D4; border-right: 2px solid #06B6D4; }
+
+    /* Detail HUD Card Exactly Aside the Crosshair */
+    #reticleCard {
+      position: absolute;
+      display: none;
+      z-index: 25;
+      background: #121214;
+      border: 1px solid #222226;
+      border-radius: 6px;
+      width: 280px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+      pointer-events: auto;
+    }
+
+    /* Floating Action Buttons */
+    .floating-fab {
+      background: #121214;
+      border: 1px solid #222226;
+      border-radius: 6px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      cursor: pointer;
+    }
+
+    /* Popups / Drawers */
+    #viewMenuModal {
+      position: fixed;
+      bottom: 65px;
+      right: 20px;
+      width: 240px;
+      background: #121214;
+      border: 1px solid #222226;
+      border-radius: 6px;
+      padding: 12px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 45;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    }
+    #aiChatDrawer {
+      position: fixed;
+      bottom: 65px;
+      right: 20px;
+      width: 380px;
+      height: 520px;
+      max-height: calc(100vh - 90px);
+      background: #121214;
+      border: 1px solid #222226;
+      border-radius: 8px;
+      z-index: 45;
+      display: none;
+      flex-direction: column;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.8);
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0A0A0B; }
+    ::-webkit-scrollbar-thumb { background: #222226; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #333339; }
+  </style>
+</head>
+
+<body class="bg-canvas-dark text-text-primary">
+
+  <!-- ======================================================== -->
+  <!-- 1. SLIDING / EXTRACTABLE SIDEBAR (Extracts / Sleeps Back) -->
+  <!-- ======================================================== -->
+  <aside id="sideNav">
+    <!-- Sidebar Header with Interactive Logo (Acts as Slip-Back Button) -->
+    <div class="h-14 hairline border-b flex items-center px-4">
+      <div id="sidebarLogoBtn" class="flex items-center cursor-pointer group" title="Click logo to slip sidebar back in">
+        <div class="relative flex items-center justify-center p-0.5 rounded-full border border-border-dark bg-canvas-dark group-hover:border-cyan-reticle group-hover:shadow-[0_0_14px_rgba(49,199,226,0.4)] transition-all">
+          <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="SPHEREx Mission Logo" class="w-9 h-9 rounded-full object-cover" />
+          <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-cyan-reticle border-2 border-panel-dark"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry Status Badge -->
+    <div class="p-3 hairline border-b bg-canvas-dark/40 font-mono text-[11px] space-y-1">
+      <div class="flex items-center justify-between text-text-muted">
+        <span>IRSA TAP Link:</span>
+        <span class="text-emerald-400 font-semibold flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> ONLINE
+        </span>
+      </div>
+      <div class="flex items-center justify-between text-text-muted">
+        <span>Survey Cadence:</span>
+        <span class="text-text-primary font-mono">6-Mo Epochs</span>
+      </div>
+      <div class="flex items-center justify-between text-text-muted">
+        <span>Spectral Bands:</span>
+        <span class="text-cyan-reticle font-mono">102 (0.75–5.0µm)</span>
+      </div>
+    </div>
+
+    <!-- Navigation Menu (Smooth scroll to sections) -->
+    <nav class="flex-1 py-3 px-2 space-y-1 font-mono text-xs overflow-y-auto">
+      <a href="#dashboard" class="flex items-center gap-2.5 px-3 py-2 rounded text-text-primary hover:bg-canvas-dark hairline border-transparent hover:border-border-dark transition-colors">
+        <i data-lucide="crosshair" class="w-4 h-4 text-cyan-reticle"></i>
+        <span>Starfield Workbench</span>
+      </a>
+      <a href="#sed-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-text-muted hover:text-text-primary hover:bg-canvas-dark hairline border-transparent hover:border-border-dark transition-colors">
+        <i data-lucide="activity" class="w-4 h-4 text-amber-candidate"></i>
+        <span>102-Band SED Spectrum</span>
+      </a>
+      <a href="#mission-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-text-muted hover:text-text-primary hover:bg-canvas-dark hairline border-transparent hover:border-border-dark transition-colors">
+        <i data-lucide="satellite" class="w-4 h-4 text-blue-400"></i>
+        <span>Mission & Instruments</span>
+      </a>
+      <a href="#targets-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-text-muted hover:text-text-primary hover:bg-canvas-dark hairline border-transparent hover:border-border-dark transition-colors">
+        <i data-lucide="compass" class="w-4 h-4 text-purple-400"></i>
+        <span>Benchmark Catalog</span>
+      </a>
+      <a href="#settings-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-text-muted hover:text-text-primary hover:bg-canvas-dark hairline border-transparent hover:border-border-dark transition-colors">
+        <i data-lucide="sliders" class="w-4 h-4 text-text-muted"></i>
+        <span>Telemetry Settings</span>
+      </a>
+    </nav>
+
+    <!-- Sidebar Footer with NASA Space Apps Badge -->
+    <div class="p-3 hairline border-t bg-canvas-dark/30 font-mono text-[10px] text-text-muted space-y-1">
+      <div>NASA Space Apps 2026</div>
+      <div class="text-[9px] text-text-muted/70">Caltech IRSA · SPHEREx Level 3</div>
+    </div>
+  </aside>
+
+  <!-- ======================================================== -->
+  <!-- 2. MAIN VIEWPORT & SCROLLABLE SECTIONS                  -->
+  <!-- ======================================================== -->
+  <div id="mainWrapper">
+
+    <!-- Top Telemetry Header -->
+    <header class="h-14 hairline border-b bg-panel-dark flex items-center justify-between px-6 sticky top-0 z-30">
+      <div class="flex items-center gap-3">
+        <!-- Logo click triggers extract/collapse of sidebar -->
+        <div id="headerLogoTrigger" class="flex items-center cursor-pointer group" title="Click logo to toggle navigation panel">
+          <div class="relative flex items-center justify-center p-0.5 rounded-full border border-border-dark bg-canvas-dark group-hover:border-cyan-reticle group-hover:shadow-[0_0_14px_rgba(49,199,226,0.4)] transition-all">
+            <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="SPHEREx Mission Logo" class="w-9 h-9 rounded-full object-cover" />
+            <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-panel-dark animate-pulse" title="System Online"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Target & Telemetry Badges -->
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <div class="hidden sm:flex items-center gap-2 text-text-muted">
+          <span>Active Target:</span>
+          <span id="headerTargetName" class="text-cyan-reticle font-semibold">Barnard's Star</span>
+        </div>
+        <div class="hidden lg:flex items-center gap-2 text-text-muted">
+          <span>RA/Dec:</span>
+          <span id="headerTargetCoords" class="text-text-primary">17h 57m 48.50s / +04° 41′ 36.2″</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ======================================================== -->
+    <!-- DEDICATED TWO-MODE TARGET INPUT BAR (Directly Above Sky) -->
+    <!-- ======================================================== -->
+    <section class="bg-panel-dark hairline border-b px-6 py-3 flex flex-col gap-2.5 z-20 relative" aria-label="Target Coordinates and Location Input">
+      <div class="flex items-end gap-3.5 flex-wrap">
+
+        <!-- Two-Mode Segmented Switch -->
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-mono text-text-muted uppercase tracking-wider font-semibold">Observation Mode</span>
+          <div class="inline-flex bg-canvas-dark border border-border-dark rounded-md p-0.5 gap-0.5" role="tablist">
+            <button id="tabModeSky" type="button" class="px-3 py-1.5 font-mono text-[11px] font-semibold text-cyan-reticle bg-panel-elevated border border-border-dark rounded cursor-pointer transition-all flex items-center gap-1.5 shadow-sm" role="tab" aria-selected="true">
+              <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+              <span>Sky RA/Dec</span>
+            </button>
+            <button id="tabModeEarth" type="button" class="px-3 py-1.5 font-mono text-[11px] font-semibold text-text-muted hover:text-text-primary bg-transparent border border-transparent rounded cursor-pointer transition-all flex items-center gap-1.5" role="tab" aria-selected="false">
+              <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+              <span>Earth Location</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Target Input Form -->
+        <form id="targetInputForm" class="flex items-end gap-2.5 flex-1 min-w-[280px]" onsubmit="return false;">
+          <div class="flex flex-col flex-1 gap-1">
+            <label id="targetInputLabel" for="targetInputBox" class="font-mono text-[11px] font-semibold text-text-muted tracking-wide uppercase">
+              Sky Coordinates (RA, Dec) or Object Name
+            </label>
+            <input
+              id="targetInputBox"
+              type="text"
+              class="bg-canvas-dark border border-border-dark rounded-md text-text-primary font-mono text-xs px-3.5 py-2 outline-none w-full focus:border-cyan-reticle focus:ring-1 focus:ring-cyan-reticle transition-all placeholder:text-[#55555E]"
+              placeholder="e.g. 269.452, 4.693 or Barnard's Star"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <!-- Observe Action Button -->
+          <button id="observeBtn" type="button" class="bg-panel-elevated hover:bg-canvas-dark border border-border-dark hover:border-cyan-reticle text-text-primary hover:text-cyan-reticle font-mono text-xs font-bold px-4 py-2 rounded-md cursor-pointer flex items-center gap-1.5 transition-all shadow-sm hover:shadow-[0_0_12px_rgba(6,182,212,0.35)] shrink-0" title="Submit target query to backend /api/sky">
+            <span>Observe</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </form>
+      </div>
+
+      <!-- Inline Loading & Error Feedback Container -->
+      <div id="statusFeedback" class="hidden font-mono text-xs items-center gap-2 py-0.5"></div>
+
+      <!-- Resolved Confirmation Strip (Directly Below Input) -->
+      <div id="resolvedConfirmationStrip" class="flex items-center justify-between px-3.5 py-1.5 bg-canvas-dark border border-border-dark rounded font-mono text-[11px] text-text-muted gap-3 flex-wrap">
+        <div class="flex items-center gap-2.5">
+          <span class="inline-flex items-center gap-1.5 text-emerald-400 font-bold uppercase tracking-wider">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Resolved:
+          </span>
+          <span id="resolvedData" class="text-text-primary font-semibold">RA 269.4521° · Dec +4.6934°</span>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs">
+          <span class="text-text-muted">Mode: <strong id="resolvedMode" class="text-cyan-reticle font-semibold">Sky RA/Dec</strong></span>
+          <span class="text-border-dark">|</span>
+          <span id="resolvedEpochs" class="text-emerald-400 font-semibold">3 Epochs</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 1: HERO DEEP SPACE WORKBENCH (FULL VIEWPORT)     -->
+    <!-- ======================================================== -->
+    <section id="dashboard" class="relative w-full h-[calc(100vh-128px)] min-h-[520px] bg-canvas-dark flex flex-col overflow-hidden">
+      
+      <!-- Top Control Bar in Viewport -->
+      <div class="absolute top-3 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+        <!-- Mode Badge & Quick Benchmark Selector -->
+        <div class="flex items-center gap-2 pointer-events-auto">
+          <div class="px-2.5 py-1 rounded bg-panel-dark/90 hairline border-border-dark font-mono text-xs flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-cyan-reticle"></span>
+            <span id="activeModeLabel" class="text-text-primary font-medium">Frame-by-Frame Blink Corridor (Frame 1/6 @ 4.0 FPS)</span>
+          </div>
+          <select id="benchmarkSelector" class="bg-panel-dark/90 hairline border-border-dark rounded px-2.5 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-cyan-reticle cursor-pointer">
+            <option value="barnard">Barnard's Star (10.36″/yr)</option>
+            <option value="wise0855">WISE 0855-0714 (Brown Dwarf)</option>
+            <option value="epsindi">Epsilon Indi B (Binary Mover)</option>
+            <option value="rwaura">RW Aurigae (T Tauri IR)</option>
+            <option value="rdrac">R Draconis (Mira Variable)</option>
+          </select>
+        </div>
+
+        <!-- Coordinates HUD overlay -->
+        <div class="hidden md:flex items-center gap-2 font-mono text-[11px] bg-panel-dark/90 hairline border-border-dark px-3 py-1 rounded text-text-muted pointer-events-auto">
+          <span>CURSOR:</span>
+          <span id="cursorRaDecHud" class="text-cyan-reticle">RA: 17h 57m · DEC: +04° 41′</span>
+          <span class="text-border-dark">|</span>
+          <span id="blinkFpsHud">FRAME 1/6 · 4.0 FPS</span>
+        </div>
+      </div>
+
+      <!-- Main Canvas for Interactive Stars, Blink & Difference Engine -->
+      <div id="canvasContainer" class="relative w-full h-full cursor-crosshair">
+        <canvas id="starCanvas" class="w-full h-full block"></canvas>
+
+        <!-- Precision Reticle Following Mouse -->
+        <div id="reticleBox">
+          <div class="reticle-corner reticle-tl"></div>
+          <div class="reticle-corner reticle-tr"></div>
+          <div class="reticle-corner reticle-bl"></div>
+          <div class="reticle-corner reticle-br"></div>
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="w-1.5 h-1.5 bg-cyan-reticle rounded-full"></div>
+          </div>
+        </div>
+
+        <!-- DETAIL HUD CARD EXACTLY ASIDE THE CROSSHAIR -->
+        <div id="reticleCard" class="p-3 font-mono text-xs space-y-2">
+          <div class="flex items-start justify-between border-b border-border-dark pb-2">
+            <div>
+              <div id="hudTargetName" class="font-bold text-text-primary text-sm">Barnard's Star</div>
+              <div id="hudTargetType" class="text-[10px] text-text-muted">High-Proper-Motion M Dwarf</div>
+            </div>
+            <span id="hudTargetBadge" class="text-[9px] px-1.5 py-0.5 rounded bg-amber-candidate/20 text-amber-candidate border border-amber-candidate/40 font-semibold uppercase">
+              Candidate
+            </span>
+          </div>
+
+          <div class="space-y-1 text-[11px]">
+            <div class="flex justify-between">
+              <span class="text-text-muted">Proper Motion:</span>
+              <span id="hudTargetPm" class="text-text-primary font-bold">10.36″/yr (PA 355.8°)</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-muted">Coordinates:</span>
+              <span id="hudTargetCoords" class="text-cyan-reticle">17h 57m · +04° 41′</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-muted">Epoch Displacement:</span>
+              <span id="hudTargetDisplacement" class="text-amber-candidate">+5.18″ (Δt 6 mo)</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-muted">Spectral Band Peak:</span>
+              <span class="text-text-primary">2.45 µm (LVF-3)</span>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-border-dark flex items-center gap-2">
+            <a href="#sed-section" class="flex-1 text-center btn py-1 px-2 rounded hairline bg-canvas-dark text-[10px] text-cyan-reticle hover:border-cyan-reticle">
+              Inspect SED
+            </a>
+          </div>
+        </div>
+
+        <!-- Scroll Indicator / Prompt at Bottom of Viewport -->
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 font-mono text-[10px] text-text-muted/80 pointer-events-none">
+          <span>SCROLL DOWN FOR 102-BAND SPECTRAL ANALYSIS</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 animate-bounce"></i>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 2: 102-BAND SED SPECTRAL PLOT & ANALYSIS        -->
+    <!-- ======================================================== -->
+    <section id="sed-section" class="min-h-screen bg-panel-dark hairline border-t p-6 md:p-10 flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-6">
+        
+        <!-- Section Header -->
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border-dark pb-4">
+          <div>
+            <div class="font-orbitron text-xs font-semibold text-cyan-reticle tracking-wider uppercase">Linear Variable Filter Spectrophotometry</div>
+            <h2 class="text-xl md:text-2xl font-bold tracking-tight text-text-primary mt-1">102-Band Spectral Energy Distribution (0.75 – 5.0 µm)</h2>
+            <p class="text-xs text-text-muted font-mono mt-1">Resolves H₂O, CH₄, CO₂, and CO ice absorption profiles across SPHEREx 6 detector arrays.</p>
+          </div>
+          <!-- Action Buttons -->
+          <div class="flex items-center gap-3">
+            <button id="downloadCsvBtn" class="btn px-3 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono flex items-center gap-1.5 text-text-primary hover:border-cyan-reticle">
+              <i data-lucide="download" class="w-3.5 h-3.5 text-cyan-reticle"></i>
+              <span>Export 102-Band CSV</span>
+            </button>
+            <span class="font-mono text-xs px-2.5 py-1 rounded bg-canvas-dark hairline border-border-dark text-text-muted">
+              R = λ/Δλ ~ 41–135
+            </span>
+          </div>
+        </div>
+
+        <!-- Molecular Absorption Badges -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+          <div class="p-2.5 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-between">
+            <span class="text-text-muted">H₂O Vapor / Ice:</span>
+            <span class="text-cyan-reticle font-semibold">1.40 & 3.05 µm</span>
+          </div>
+          <div class="p-2.5 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-between">
+            <span class="text-text-muted">CH₄ Methane:</span>
+            <span class="text-amber-candidate font-semibold">1.66 & 2.20 µm</span>
+          </div>
+          <div class="p-2.5 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-between">
+            <span class="text-text-muted">CO₂ Ice Dip:</span>
+            <span class="text-purple-400 font-semibold">4.27 µm</span>
+          </div>
+          <div class="p-2.5 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-between">
+            <span class="text-text-muted">CO Carbon Monoxide:</span>
+            <span class="text-emerald-400 font-semibold">4.67 µm</span>
+          </div>
+        </div>
+
+        <!-- Interactive SED Canvas Chart -->
+        <div class="relative bg-canvas-dark hairline border-border-dark rounded-lg p-4 h-[380px]">
+          <canvas id="sedCanvas" class="w-full h-full block"></canvas>
+          <!-- Hover telemetry badge on graph -->
+          <div id="sedHoverBadge" class="absolute top-6 right-6 hidden font-mono text-xs bg-panel-dark/95 hairline border-border-dark px-3 py-1.5 rounded text-text-primary shadow-lg">
+            <span id="sedHoverWavelength" class="text-cyan-reticle">λ: 2.45 µm</span> | 
+            <span id="sedHoverFlux" class="text-amber-candidate">Flux: 0.842 Jy</span>
+          </div>
+        </div>
+
+        <!-- Telemetry Data Summary Table -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+          <div class="p-4 rounded bg-canvas-dark hairline border-border-dark space-y-2">
+            <div class="text-text-muted font-semibold uppercase text-[10px]">Astrometric Kinematics</div>
+            <div class="flex justify-between"><span>Total Proper Motion:</span><span class="text-text-primary font-bold">10.36″/yr</span></div>
+            <div class="flex justify-between"><span>Position Angle (PA):</span><span class="text-text-primary">355.8°</span></div>
+            <div class="flex justify-between"><span>Radial Velocity:</span><span class="text-cyan-reticle">-110.6 km/s</span></div>
+          </div>
+          <div class="p-4 rounded bg-canvas-dark hairline border-border-dark space-y-2">
+            <div class="text-text-muted font-semibold uppercase text-[10px]">Photometric Indexes</div>
+            <div class="flex justify-between"><span>[0.75] − [1.50] Color:</span><span class="text-text-primary">+1.42 mag</span></div>
+            <div class="flex justify-between"><span>[3.05] Ice Absorption Depth:</span><span class="text-amber-candidate font-bold">ΔF/F = 0.38</span></div>
+            <div class="flex justify-between"><span>Optical-to-IR Ratio:</span><span class="text-text-primary">1 : 4.8</span></div>
+          </div>
+          <div class="p-4 rounded bg-canvas-dark hairline border-border-dark space-y-2">
+            <div class="text-text-muted font-semibold uppercase text-[10px]">Candidate Verification</div>
+            <div class="flex justify-between"><span>Gaia DR3 Cross-match:</span><span class="text-emerald-400 font-bold">CONFIRMED</span></div>
+            <div class="flex justify-between"><span>CatWISE Designation:</span><span class="text-text-primary">CW-J175748</span></div>
+            <div class="flex justify-between"><span>Scientific Category:</span><span class="text-cyan-reticle font-bold">High Mover Benchmark</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 3: MISSION PROFILE: SPHEREx (NASA OBSERVATORY)   -->
+    <!-- ======================================================== -->
+    <section id="mission-section" class="py-16 px-6 md:px-12 bg-canvas-dark hairline border-t flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-12">
+        
+        <!-- 1. Hero / Section Overview (<MissionHero />) with Official Emblem Badge -->
+        <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8 pb-4 border-b border-border-dark/60">
+          <div class="space-y-4 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-panel-dark hairline border-border-dark text-[11px] font-mono text-cyan-reticle font-semibold">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                NASA ASTROPHYSICS • ACTIVE IN ORBIT (DR1 RELEASED NOV 2026)
+              </span>
+              <span class="px-2.5 py-1 rounded bg-panel-dark hairline border-border-dark text-[11px] font-mono text-text-muted">
+                Medium-Class Explorer (MIDEX)
+              </span>
+            </div>
+
+            <div class="space-y-1">
+              <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-text-primary font-sans">
+                SPHEREx: Mapping the Cosmos in 102 Colors
+              </h2>
+              <div class="font-mono text-xs text-cyan-reticle tracking-wide">
+                Spectro-Photometer for the History of the Universe, Epoch of Reionization, and Ices Explorer
+              </div>
+            </div>
+
+            <p class="text-sm text-text-muted font-sans leading-relaxed max-w-4xl">
+              SPHEREx is an all-sky near-infrared space observatory conducting the <strong class="text-text-primary">first-ever all-sky near-infrared spectral survey</strong>. While flagship observatories like JWST function as cosmic microscopes—zooming into narrow target fields in extreme detail—SPHEREx functions as a wide-angle panoramic camera. Scanning the entire celestial sphere every six months, it maps hundreds of millions of galaxies and stars across 102 contiguous infrared wavelength bands.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono text-text-muted">
+              <span class="text-text-primary font-medium">Lead Agencies & Partners:</span>
+              <span class="px-2 py-0.5 rounded bg-panel-dark hairline border-border-dark">NASA JPL</span>
+              <span class="px-2 py-0.5 rounded bg-panel-dark hairline border-border-dark">Caltech (PI: Jamie Bock)</span>
+              <span class="px-2 py-0.5 rounded bg-panel-dark hairline border-border-dark">BAE Systems</span>
+              <span class="px-2 py-0.5 rounded bg-panel-dark hairline border-border-dark">KASI (Korea)</span>
+              <span class="px-2 py-0.5 rounded bg-panel-dark hairline border-border-dark">SpaceX Falcon 9</span>
+            </div>
+          </div>
+
+          <!-- Official SPHEREx Mission Visualizer Badge -->
+          <div class="flex-shrink-0 flex flex-col items-center">
+            <div class="p-2.5 rounded-2xl bg-panel-dark hairline border-border-dark shadow-2xl relative group">
+              <div class="absolute -inset-1 bg-gradient-to-b from-cyan-reticle/20 via-transparent to-amber-candidate/10 rounded-2xl blur-lg opacity-40 group-hover:opacity-75 transition duration-500"></div>
+              <img src="logo.jpg" alt="SPHEREx Mission Visualizer Official Badge" class="relative w-44 md:w-52 h-auto rounded-xl object-contain shadow-inner" />
+            </div>
+            <div class="mt-2 text-[10px] font-mono text-text-muted tracking-wider uppercase">Official Mission Insignia</div>
+          </div>
+        </div>
+
+        <!-- 2. Quick Stats / Highlight Cards (<StatsGrid />) -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Launch Date</div>
+            <div class="text-base font-bold text-text-primary">Mar 11, 2025</div>
+            <div class="text-[10px] text-cyan-reticle">SpaceX Falcon 9</div>
+          </div>
+
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Spectral Bands</div>
+            <div class="text-base font-bold text-cyan-reticle">102 Colors</div>
+            <div class="text-[10px] text-text-muted">0.75 – 5.0 µm NIR</div>
+          </div>
+
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Galaxies Mapped</div>
+            <div class="text-base font-bold text-text-primary">&gt; 450 Million</div>
+            <div class="text-[10px] text-amber-candidate">3D Cosmic Map</div>
+          </div>
+
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Stars Surveyed</div>
+            <div class="text-base font-bold text-text-primary">&gt; 100 Million</div>
+            <div class="text-[10px] text-text-muted">Milky Way Galaxy</div>
+          </div>
+
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Sky Coverage</div>
+            <div class="text-base font-bold text-emerald-400">100% All-Sky</div>
+            <div class="text-[10px] text-text-muted">4 Maps / 25 Mo</div>
+          </div>
+
+          <div class="p-4 rounded-lg bg-panel-dark hairline border-border-dark space-y-1">
+            <div class="text-[10px] text-text-muted uppercase">Orbit Altitude</div>
+            <div class="text-base font-bold text-text-primary">700 km</div>
+            <div class="text-[10px] text-text-muted">Sun-synchronous LEO</div>
+          </div>
+        </div>
+
+        <!-- 3. Core Scientific Objectives (3 Primary Science Pillars) (<ScienceObjectives />) -->
+        <div class="space-y-4">
+          <div class="border-b border-border-dark pb-2">
+            <div class="font-orbitron text-xs font-semibold text-cyan-reticle tracking-wider uppercase">Core Scientific Objectives</div>
+            <h3 class="text-xl font-bold tracking-tight text-text-primary mt-1 font-sans">Three Primary Science Pillars</h3>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 font-mono text-xs">
+            <!-- Pillar 1 -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-3 flex flex-col justify-between">
+              <div class="space-y-2">
+                <div class="w-9 h-9 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-center text-cyan-reticle">
+                  <i data-lucide="atom" class="w-5 h-5"></i>
+                </div>
+                <div class="text-xs font-bold font-sans text-text-primary">Pillar 1: Cosmic Inflation</div>
+                <div class="text-[11px] text-cyan-reticle font-semibold">Probing the Origin of the Universe</div>
+                <p class="text-text-muted leading-relaxed font-sans text-xs">
+                  Investigates the first fraction of a second (&lt; 10⁻³² s) after the Big Bang during exponential cosmic inflation. By cataloging 3D positions and redshifts of &gt; 450M galaxies, SPHEREx maps matter distributions to isolate fossil quantum fluctuations.
+                </p>
+              </div>
+              <div class="pt-2 border-t border-border-dark/60 text-[10px] text-text-muted">
+                3D Cosmological Large-Scale Structure
+              </div>
+            </div>
+
+            <!-- Pillar 2 -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-3 flex flex-col justify-between">
+              <div class="space-y-2">
+                <div class="w-9 h-9 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-center text-amber-candidate">
+                  <i data-lucide="sparkles" class="w-5 h-5"></i>
+                </div>
+                <div class="text-xs font-bold font-sans text-text-primary">Pillar 2: Galaxy Formation History</div>
+                <div class="text-[11px] text-amber-candidate font-semibold">Tracing Origin of Cosmic Light</div>
+                <p class="text-text-muted leading-relaxed font-sans text-xs">
+                  Measures the total integrated extragalactic background light and intra-halo light across 13 billion years. Quantifies collective photon output from faint, early stellar populations during the Epoch of Reionization that cannot be resolved individually.
+                </p>
+              </div>
+              <div class="pt-2 border-t border-border-dark/60 text-[10px] text-text-muted">
+                Extragalactic Background & Intra-Halo Glow
+              </div>
+            </div>
+
+            <!-- Pillar 3 -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-3 flex flex-col justify-between">
+              <div class="space-y-2">
+                <div class="w-9 h-9 rounded bg-canvas-dark hairline border-border-dark flex items-center justify-center text-purple-400">
+                  <i data-lucide="droplet" class="w-5 h-5"></i>
+                </div>
+                <div class="text-xs font-bold font-sans text-text-primary">Pillar 3: Interstellar Ices</div>
+                <div class="text-[11px] text-purple-400 font-semibold">Building Blocks of Habitable Worlds</div>
+                <p class="text-text-muted leading-relaxed font-sans text-xs">
+                  Probes cold dense interstellar clouds and young stellar nurseries across the Milky Way. Using infrared absorption spectroscopy, it measures abundances of frozen water (H₂O), carbon dioxide (CO₂), carbon monoxide (CO), and methanol (CH₃OH) on cosmic dust grains.
+                </p>
+              </div>
+              <div class="pt-2 border-t border-border-dark/60 text-[10px] text-text-muted">
+                Pre-Planetary Volatiles & Biogenic Ices
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Spacecraft & Scientific Instruments (<InstrumentBreakdown />) -->
+        <div class="space-y-4">
+          <div class="border-b border-border-dark pb-2">
+            <div class="font-orbitron text-xs font-semibold text-cyan-reticle tracking-wider uppercase">Hardware & Instrument Blueprint</div>
+            <h3 class="text-xl font-bold tracking-tight text-text-primary mt-1 font-sans">Single Integrated Instrument Architecture</h3>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-xs">
+            <!-- Hardware 1: Primary Telescope -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="font-bold font-sans text-sm text-text-primary">A. Primary Telescope & Optics</span>
+                <span class="text-[10px] text-cyan-reticle font-mono">20 cm Aperture</span>
+              </div>
+              <p class="text-text-muted leading-relaxed font-sans text-xs">
+                Off-axis, all-aluminum wide-field reflecting telescope ($20\text{ cm} / 7.9\text{ in}$). Compact design optimized for rapid slewing across a massive $3.5^\circ \times 11.3^\circ$ field of view (~20 times wider than the full Moon) spanning $0.75\text{ to }5.0\ \mu\text{m}$.
+              </p>
+              <div class="text-[10px] text-text-primary font-mono bg-canvas-dark px-2.5 py-1 rounded hairline border-border-dark flex justify-between">
+                <span>Field of View: 3.5° × 11.3°</span>
+                <span>All-Aluminum Reflecting Optics</span>
+              </div>
+            </div>
+
+            <!-- Hardware 2: Linear Variable Filters -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="font-bold font-sans text-sm text-text-primary">B. Linear Variable Filters (LVF)</span>
+                <span class="text-[10px] text-amber-candidate font-mono">Zero Moving Parts</span>
+              </div>
+              <p class="text-text-muted leading-relaxed font-sans text-xs">
+                Continuous dielectric coatings mounted directly above the detectors vary transmission wavelength along each pixel row. As the telescope sweeps the sky, every astronomical source passes across all rows, constructing complete 102-color spectra with zero moving filter wheels.
+              </p>
+              <div class="text-[10px] text-text-primary font-mono bg-canvas-dark px-2.5 py-1 rounded hairline border-border-dark flex justify-between">
+                <span>102 Spectral Channels</span>
+                <span>Dielectric Thickness Gradient</span>
+              </div>
+            </div>
+
+            <!-- Hardware 3: Detectors -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="font-bold font-sans text-sm text-text-primary">C. Focal Plane Detector Arrays</span>
+                <span class="text-[10px] text-purple-400 font-mono">6 Teledyne H2RG Arrays</span>
+              </div>
+              <p class="text-text-muted leading-relaxed font-sans text-xs">
+                Two $1 \times 3$ mosaics of Teledyne H2RG Mercury-Cadmium-Telluride (HgCdTe) infrared detectors (6 arrays total). Delivers $6.2\text{ arcsec}$ spatial sampling with resolving power $R = \lambda/\Delta\lambda \approx 41$ (short wavelengths) to $R \approx 135$ (long wavelengths).
+              </p>
+              <div class="text-[10px] text-text-primary font-mono bg-canvas-dark px-2.5 py-1 rounded hairline border-border-dark flex justify-between">
+                <span>Pixel Scale: 6.2″ / pixel</span>
+                <span>Resolving Power: R ~ 41–135</span>
+              </div>
+            </div>
+
+            <!-- Hardware 4: Cryogenic V-Groove Shields -->
+            <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="font-bold font-sans text-sm text-text-primary">D. Passive Cryogenic V-Groove Shields</span>
+                <span class="text-[10px] text-emerald-400 font-mono">T &lt; 80 K (-193°C)</span>
+              </div>
+              <p class="text-text-muted leading-relaxed font-sans text-xs">
+                Three nested cone-shaped aluminum radiative photon shields dump thermal infrared emission directly into deep space. Passively cools the telescope and detector assembly below $80\text{ K}$ without consumable liquid helium cryogens, guaranteeing mission lifetime.
+              </p>
+              <div class="text-[10px] text-text-primary font-mono bg-canvas-dark px-2.5 py-1 rounded hairline border-border-dark flex justify-between">
+                <span>Radiative Deep Space Sink</span>
+                <span>Zero Expendable Cryogens</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Mission Timeline & Milestones Tracker (<MissionTimeline />) -->
+        <div class="space-y-4">
+          <div class="border-b border-border-dark pb-2">
+            <div class="font-orbitron text-xs font-semibold text-cyan-reticle tracking-wider uppercase">Mission Flight Timeline</div>
+            <h3 class="text-xl font-bold tracking-tight text-text-primary mt-1 font-sans">Milestone Progression (2019 – 2027)</h3>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono text-xs">
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1">
+              <div class="text-[10px] text-cyan-reticle font-bold">FEB 2019</div>
+              <div class="font-bold text-text-primary text-[11px]">NASA Selection</div>
+              <div class="text-[10px] text-text-muted">Selected as MIDEX mission</div>
+            </div>
+
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1 border-cyan-reticle/40">
+              <div class="text-[10px] text-emerald-400 font-bold">MAR 11, 2025</div>
+              <div class="font-bold text-text-primary text-[11px]">Falcon 9 Launch</div>
+              <div class="text-[10px] text-text-muted">Vandenberg SFB rideshare</div>
+            </div>
+
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1">
+              <div class="text-[10px] text-cyan-reticle font-bold">APR 2025</div>
+              <div class="font-bold text-text-primary text-[11px]">First Light</div>
+              <div class="text-[10px] text-text-muted">In-orbit calibration verified</div>
+            </div>
+
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1">
+              <div class="text-[10px] text-cyan-reticle font-bold">MAY 1, 2025</div>
+              <div class="font-bold text-text-primary text-[11px]">Science Survey</div>
+              <div class="text-[10px] text-text-muted">Routine all-sky operations</div>
+            </div>
+
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1">
+              <div class="text-[10px] text-amber-candidate font-bold">APR 2026</div>
+              <div class="font-bold text-text-primary text-[11px]">Ice Clouds Mapped</div>
+              <div class="text-[10px] text-text-muted">Interstellar glaciers cataloged</div>
+            </div>
+
+            <div class="p-3.5 rounded bg-panel-dark hairline border-border-dark space-y-1 border-amber-candidate/40">
+              <div class="text-[10px] text-amber-candidate font-bold">NOV 2026</div>
+              <div class="font-bold text-text-primary text-[11px]">Data Release 1</div>
+              <div class="text-[10px] text-text-muted">DR1 published via Caltech IRSA</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Team Pioneer Matrix & NASA Space Apps Challenge Card -->
+        <div class="p-5 rounded-lg bg-panel-dark hairline border-border-dark flex flex-col md:flex-row items-center justify-between gap-4 font-mono text-xs">
+          <div class="flex items-center gap-4">
+            <div class="relative flex items-center justify-center p-0.5 rounded-full border border-border-dark bg-canvas-dark shrink-0">
+              <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="Team Pioneer Matrix Logo" class="w-12 h-12 rounded-full object-cover" />
+            </div>
+            <div>
+              <div class="font-orbitron font-bold text-text-primary text-sm">Team Pioneer Matrix</div>
+              <div class="text-text-muted text-[11px]">NASA International Space Apps Challenge 2026</div>
+              <p class="text-[11px] text-text-muted mt-1 leading-relaxed max-w-xl font-sans">
+                Engineered for the NASA International Space Apps Challenge 2026 to provide browser-native scientific telemetry analysis and proper-motion dipole discovery for the SPHEREx mission.
+              </p>
+            </div>
+          </div>
+          <div class="text-right text-text-muted text-[11px] shrink-0">
+            <div class="text-text-primary font-semibold">NASA Space Apps Challenge 2026</div>
+            <div class="text-cyan-reticle font-mono">Team: Pioneer Matrix</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 4: BENCHMARK TARGETS & SETTINGS                  -->
+    <!-- ======================================================== -->
+    <section id="targets-section" class="min-h-screen bg-panel-dark hairline border-t p-6 md:p-10 flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-6">
+        <div>
+          <div class="font-orbitron text-xs font-semibold text-cyan-reticle tracking-wider uppercase">Calibrated Benchmarks & Candidates</div>
+          <h2 class="text-2xl font-bold tracking-tight text-text-primary mt-1">High-Proper-Motion Benchmark Library</h2>
+          <p class="text-xs text-text-muted font-mono mt-1">Select any calibrated benchmark to instantly focus the starfield engine and load verified SED spectroscopy.</p>
+        </div>
+
+        <!-- Target Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+          <div class="target-card p-4 rounded bg-canvas-dark hairline border-border-dark hover:border-cyan-reticle cursor-pointer transition-colors space-y-2" data-target="barnard">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-text-primary text-sm">Barnard's Star</span>
+              <span class="text-[10px] text-cyan-reticle font-semibold">10.36″/yr</span>
+            </div>
+            <p class="text-[11px] text-text-muted">Nearest single red dwarf (M4.0V) with the highest known stellar proper motion in the sky.</p>
+            <div class="text-[10px] text-text-muted">RA: 17h 57m 48.5s · Dec: +04° 41′ 36″</div>
+          </div>
+
+          <div class="target-card p-4 rounded bg-canvas-dark hairline border-border-dark hover:border-cyan-reticle cursor-pointer transition-colors space-y-2" data-target="wise0855">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-text-primary text-sm">WISE 0855-0714</span>
+              <span class="text-[10px] text-amber-candidate font-semibold">8.14″/yr</span>
+            </div>
+            <p class="text-[11px] text-text-muted">Sub-stellar Y2 brown dwarf (~250K) with prominent atmospheric water ice cloud signatures.</p>
+            <div class="text-[10px] text-text-muted">RA: 08h 55m 10.8s · Dec: -07° 14′ 42″</div>
+          </div>
+
+          <div class="target-card p-4 rounded bg-canvas-dark hairline border-border-dark hover:border-cyan-reticle cursor-pointer transition-colors space-y-2" data-target="epsindi">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-text-primary text-sm">Epsilon Indi B</span>
+              <span class="text-[10px] text-purple-400 font-semibold">4.70″/yr</span>
+            </div>
+            <p class="text-[11px] text-text-muted">Close binary brown dwarf system (T1 + T6) ideal for resolving differential infrared kinematics.</p>
+            <div class="text-[10px] text-text-muted">RA: 22h 04m 10.5s · Dec: -56° 46′ 58″</div>
+          </div>
+        </div>
+
+        <!-- Settings Box -->
+        <div id="settings-section" class="p-6 rounded-lg bg-canvas-dark hairline border-border-dark font-mono text-xs space-y-4">
+          <div class="font-orbitron font-semibold text-text-primary text-sm">Telemetry Workbench Settings</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <label class="text-text-muted">Astrometric Coordinate Epoch:</label>
+              <select class="w-full bg-panel-dark hairline border-border-dark rounded p-2 text-text-primary">
+                <option>J2026.5 (SPHEREx Primary Cycle 1)</option>
+                <option>J2000.0 (Standard ICRS)</option>
+              </select>
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-text-muted">Difference Image Color Scaling:</label>
+              <select class="w-full bg-panel-dark hairline border-border-dark rounded p-2 text-text-primary">
+                <option>Cividis (Colorblind-Safe Deep Space)</option>
+                <option>Dipole Blue-Amber (High Contrast)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="pt-6 border-t border-border-dark flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs text-text-muted">
+          <div>© 2026 Pioneer Matrix · NASA Space Apps Challenge</div>
+          <div class="flex items-center gap-4">
+            <a href="#dashboard" class="hover:text-cyan-reticle transition-colors">Back to Top ↑</a>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+  </div> <!-- /#mainWrapper -->
+
+  <!-- ======================================================== -->
+  <!-- 3. FLOATING ACTION CONTROLS (FABs & MODALS)               -->
+  <!-- ======================================================== -->
+
+  <!-- Floating Action Controls: AI Chatbot & Viewing Mode (Side by Side) -->
+  <div class="fixed bottom-5 right-5 z-40 flex items-center gap-2.5">
+    <!-- Floating AI Chatbot Button (Just aside the Viewing Mode) -->
+    <button id="aiBotFab" class="floating-fab btn" title="Open SPHEREx Analyzer AI">
+      <i data-lucide="bot" class="w-4 h-4 text-cyan-reticle"></i>
+      <span class="text-xs font-mono font-medium">AI Copilot</span>
+    </button>
+
+    <!-- Floating Viewing Mode Button -->
+    <button id="viewModeFab" class="floating-fab btn" title="Switch Astronomical Viewing Modes">
+      <i data-lucide="eye" class="w-4 h-4 text-cyan-reticle"></i>
+      <span class="text-xs font-mono font-medium">Viewing Mode</span>
+    </button>
+  </div>
+
+  <!-- Sleek AI Telemetry Copilot Drawer / Modal -->
+  <div id="aiChatDrawer">
+    <!-- Header -->
+    <div class="p-3 hairline border-b flex items-center justify-between bg-panel-elevated rounded-t-lg">
+      <div class="flex items-center gap-2">
+        <i data-lucide="bot" class="w-4 h-4 text-cyan-reticle"></i>
+        <div>
+          <div class="text-xs font-bold font-mono text-text-primary">SPHEREx Analyzer AI</div>
+          <div class="text-[9px] font-mono text-text-muted">Gemini 2.5 Flash · Telemetry Inspector</div>
+        </div>
+      </div>
+      <button id="closeAiChatBtn" class="p-1 rounded text-text-muted hover:text-text-primary">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Quick Telemetry Chips -->
+    <div class="p-2 hairline border-b bg-canvas-dark/50 flex items-center gap-1.5 overflow-x-auto text-[10px] font-mono">
+      <button class="ai-chip px-2 py-1 rounded hairline bg-panel-dark text-text-muted hover:text-cyan-reticle whitespace-nowrap">Why is this dipole vertical?</button>
+      <button class="ai-chip px-2 py-1 rounded hairline bg-panel-dark text-text-muted hover:text-cyan-reticle whitespace-nowrap">Explain 3.05µm ice dip</button>
+      <button class="ai-chip px-2 py-1 rounded hairline bg-panel-dark text-text-muted hover:text-cyan-reticle whitespace-nowrap">Brown dwarf verification?</button>
+    </div>
+
+    <!-- Chat Messages Transcript -->
+    <div id="aiMessagesList" class="flex-1 p-3 overflow-y-auto space-y-3 font-mono text-xs">
+      <div class="p-2.5 rounded bg-canvas-dark hairline border-border-dark text-text-muted leading-relaxed">
+        <span class="text-cyan-reticle font-bold block mb-1">CALTECH IRSA · TELEMETRY READY</span>
+        Ready to analyze locked reticle coordinates. Currently locked on <strong class="text-text-primary">Barnard's Star</strong>. Select any source in the viewport or query an absorption band.
+      </div>
+    </div>
+
+    <!-- Input Footer -->
+    <div class="p-2.5 hairline border-t bg-panel-elevated rounded-b-lg flex items-center gap-2">
+      <input id="aiChatInput" type="text" placeholder="Ask about proper motion, SED dip, or candidate..." class="flex-1 bg-canvas-dark hairline border-border-dark rounded px-3 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:border-cyan-reticle" />
+      <button id="aiSendBtn" class="btn p-1.5 rounded hairline bg-canvas-dark text-cyan-reticle hover:border-cyan-reticle">
+        <i data-lucide="send" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Viewing Mode Popup Menu -->
+  <div id="viewMenuModal">
+    <div class="text-[10px] font-mono text-text-muted font-bold uppercase tracking-wider mb-1">Observation Mode</div>
+    <button id="modeBlinkBtn" class="w-full text-left btn px-2.5 py-1.5 rounded hairline bg-panel-elevated text-xs font-mono flex items-center justify-between text-cyan-reticle">
+      <span>Blink Mode</span>
+      <span class="text-[10px] text-text-muted">1–8 fps</span>
+    </button>
+    <button id="modeSingleBtn" class="w-full text-left btn px-2.5 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono text-text-muted hover:text-text-primary">
+      <span>Side-by-Side</span>
+    </button>
+    <button id="modeDiffBtn" class="w-full text-left btn px-2.5 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono text-text-muted hover:text-text-primary">
+      <span>Difference (E2 − E1)</span>
+    </button>
+    
+    <div class="pt-2 border-t border-border-dark space-y-1">
+      <div class="flex items-center justify-between font-mono text-[11px] text-text-muted">
+        <span>Blink Rate:</span>
+        <span id="fpsValDisplay" class="text-cyan-reticle font-bold">4.0 FPS</span>
+      </div>
+      <input id="fpsSlider" type="range" min="1" max="8" step="0.5" value="4" class="w-full cursor-pointer" />
+    </div>
+  </div>
+
+
+  <!-- ======================================================== -->
+  <!-- 4. PURE JAVASCRIPT ENGINE                                -->
+  <!-- ======================================================== -->
+  <script>
+    // Initialize Lucide SVG Icons
+    lucide.createIcons();
+
+    // ----------------------------------------------------
+    // BENCHMARK TARGET DATABASE (Caltech / Gaia / CatWISE)
+    // ----------------------------------------------------
+    const BENCHMARKS = {
+      barnard: {
+        name: "Barnard's Star",
+        type: "High-Proper-Motion M Dwarf",
+        badge: "Known Match",
+        badgeColor: "cyan",
+        ra: "17h 57m 48.50s",
+        dec: "+04° 41′ 36.2″",
+        pm: "10.36″/yr",
+        pa: 355.8,
+        parallax: "547.45 mas",
+        displacement: "+5.18″ (Δt 6 mo)",
+        peak: "2.45 µm (LVF-3)",
+        sedBaseline: 0.85,
+        iceDip: 0.38,
+        aiSummary: "Barnard's Star displays a prominent vertical dipole between Epoch 1 and Epoch 2 due to its 10.36″/yr proper motion northward. SPHEREx 102-band photometry confirms strong TiO/VO bands at 0.8–1.1 µm and shallow H2O vapor dips at 1.4 µm, fully consistent with an M4.0V spectral type."
+      },
+      wise0855: {
+        name: "WISE 0855-0714",
+        type: "Sub-stellar Y2 Brown Dwarf",
+        badge: "Candidate",
+        badgeColor: "amber",
+        ra: "08h 55m 10.83s",
+        dec: "-07° 14′ 42.5″",
+        pm: "8.14″/yr",
+        pa: 130.2,
+        parallax: "433.00 mas",
+        displacement: "+4.07″ (Δt 6 mo)",
+        peak: "4.65 µm (LVF-6)",
+        sedBaseline: 0.42,
+        iceDip: 0.65,
+        aiSummary: "WISE 0855-0714 is an ultra-cool Y-dwarf (~250K). Note the deep absorption signature at 3.05 µm in the SED plot indicating atmospheric water ice clouds, paired with strong CH4 absorption at 1.66 µm."
+      },
+      epsindi: {
+        name: "Epsilon Indi B",
+        type: "Binary T-Dwarf System (T1+T6)",
+        badge: "Known Match",
+        badgeColor: "cyan",
+        ra: "22h 04m 10.51s",
+        dec: "-56° 46′ 57.8″",
+        pm: "4.70″/yr",
+        pa: 122.4,
+        parallax: "275.80 mas",
+        displacement: "+2.35″ (Δt 6 mo)",
+        peak: "1.25 µm (LVF-1)",
+        sedBaseline: 0.72,
+        iceDip: 0.22,
+        aiSummary: "Epsilon Indi B is an astrometric brown dwarf pair. High signal-to-noise across SPHEREx LVF arrays isolates methane and ammonia absorption bands between 1.5–3.0 µm."
+      },
+      rwaura: {
+        name: "RW Aurigae",
+        type: "T Tauri Star (Infrared Excess)",
+        badge: "Known Match",
+        badgeColor: "cyan",
+        ra: "05h 07m 49.54s",
+        dec: "+30° 24′ 05.1″",
+        pm: "0.02″/yr",
+        pa: 180.0,
+        parallax: "6.12 mas",
+        displacement: "< 0.05″ (Stationary)",
+        peak: "3.40 µm (LVF-4)",
+        sedBaseline: 0.90,
+        iceDip: 0.45,
+        aiSummary: "RW Aurigae demonstrates circumstellar disk circumstellar dust obscuration. Minimal proper motion displacement confirms it as an astrometric stationary reference source."
+      },
+      rdrac: {
+        name: "R Draconis",
+        type: "Mira Long-Period Variable",
+        badge: "Known Match",
+        badgeColor: "cyan",
+        ra: "16h 32m 40.24s",
+        dec: "+66° 45′ 18.0″",
+        pm: "0.03″/yr",
+        pa: 45.0,
+        parallax: "1.85 mas",
+        displacement: "< 0.05″ (Stationary)",
+        peak: "2.10 µm (LVF-2)",
+        sedBaseline: 0.95,
+        iceDip: 0.15,
+        aiSummary: "R Draconis exhibits extreme photometric variation between 6-month SPHEREx survey epochs. Pulsational flux changes highlight difference imaging sensitivity."
+      }
+    };
+
+    let curTargetKey = 'barnard';
+    let curTarget = BENCHMARKS.barnard;
+    let observationMode = 'blink'; // 'blink' | 'single' | 'diff'
+    let blinkFps = 4.0;
+    let blinkEpoch = 1; // 1 or 2
+    let blinkIntervalId = null;
+
+    // ----------------------------------------------------
+    // 1. COLLAPSIBLE SIDEBAR LOGIC (Extracts & Sleeps Back)
+    // ----------------------------------------------------
+    // 1. COLLAPSIBLE SIDEBAR LOGIC (Logo Toggles & Slips Back)
+    // ----------------------------------------------------
+    const sideNav = document.getElementById('sideNav');
+    const mainWrapper = document.getElementById('mainWrapper');
+    const sidebarLogoBtn = document.getElementById('sidebarLogoBtn');
+    const headerLogoTrigger = document.getElementById('headerLogoTrigger');
+
+    function toggleSidebar() {
+      const isCollapsed = sideNav.classList.toggle('collapsed');
+      mainWrapper.classList.toggle('expanded', isCollapsed);
+      setTimeout(() => {
+        resizeCanvases();
+      }, 260);
+    }
+
+    if (sidebarLogoBtn) sidebarLogoBtn.addEventListener('click', toggleSidebar);
+    if (headerLogoTrigger) headerLogoTrigger.addEventListener('click', toggleSidebar);
+
+    // ----------------------------------------------------
+    // 1.1 TWO-MODE TARGET INPUT BAR & BACKEND WIRING (/api/sky)
+    // ----------------------------------------------------
+    let activeInputMode = 'sky'; // 'sky' | 'earth'
+    const tabModeSky = document.getElementById('tabModeSky');
+    const tabModeEarth = document.getElementById('tabModeEarth');
+    const targetInputLabel = document.getElementById('targetInputLabel');
+    const targetInputBox = document.getElementById('targetInputBox');
+    const targetInputForm = document.getElementById('targetInputForm');
+    const observeBtn = document.getElementById('observeBtn');
+    const statusFeedback = document.getElementById('statusFeedback');
+
+    const resolvedConfirmationStrip = document.getElementById('resolvedConfirmationStrip');
+    const resolvedData = document.getElementById('resolvedData');
+    const resolvedMode = document.getElementById('resolvedMode');
+    const resolvedEpochs = document.getElementById('resolvedEpochs');
+
+    function setInputMode(mode) {
+      if (activeInputMode === mode) return;
+      activeInputMode = mode;
+
+      if (targetInputBox) {
+        targetInputBox.value = '';
+      }
+      clearStatusFeedback();
+
+      if (mode === 'sky') {
+        tabModeSky.className = "px-3 py-1.5 font-mono text-[11px] font-semibold text-cyan-reticle bg-panel-elevated border border-border-dark rounded cursor-pointer transition-all flex items-center gap-1.5 shadow-sm";
+        tabModeEarth.className = "px-3 py-1.5 font-mono text-[11px] font-semibold text-text-muted hover:text-text-primary bg-transparent border border-transparent rounded cursor-pointer transition-all flex items-center gap-1.5";
+        tabModeSky.setAttribute('aria-selected', 'true');
+        tabModeEarth.setAttribute('aria-selected', 'false');
+        if (targetInputLabel) targetInputLabel.textContent = 'Sky Coordinates (RA, Dec) or Object Name';
+        if (targetInputBox) targetInputBox.placeholder = "e.g. 269.452, 4.693 or Barnard's Star";
+      } else {
+        tabModeEarth.className = "px-3 py-1.5 font-mono text-[11px] font-semibold text-cyan-reticle bg-panel-elevated border border-border-dark rounded cursor-pointer transition-all flex items-center gap-1.5 shadow-sm";
+        tabModeSky.className = "px-3 py-1.5 font-mono text-[11px] font-semibold text-text-muted hover:text-text-primary bg-transparent border border-transparent rounded cursor-pointer transition-all flex items-center gap-1.5";
+        tabModeEarth.setAttribute('aria-selected', 'true');
+        tabModeSky.setAttribute('aria-selected', 'false');
+        if (targetInputLabel) targetInputLabel.textContent = 'Earth City, Address, or Lat/Lon';
+        if (targetInputBox) targetInputBox.placeholder = 'e.g. Ahmedabad, India or 23.02, 72.57';
+      }
+
+      if (targetInputBox) targetInputBox.focus();
+    }
+
+    if (tabModeSky) tabModeSky.addEventListener('click', () => setInputMode('sky'));
+    if (tabModeEarth) tabModeEarth.addEventListener('click', () => setInputMode('earth'));
+
+    function showStatusFeedback(type, message) {
+      if (!statusFeedback) return;
+      statusFeedback.classList.remove('hidden');
+      statusFeedback.className = 'font-mono text-xs flex items-center gap-2 py-0.5 ' + (type === 'loading' ? 'text-cyan-reticle' : 'text-red-400');
+      if (type === 'loading') {
+        statusFeedback.innerHTML = `
+          <svg class="animate-spin w-3.5 h-3.5 text-cyan-reticle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          <span>${message}</span>
+        `;
+      } else {
+        statusFeedback.innerHTML = `
+          <svg class="w-3.5 h-3.5 text-red-400 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>${message}</span>
+        `;
+      }
+    }
+
+    function clearStatusFeedback() {
+      if (!statusFeedback) return;
+      statusFeedback.classList.add('hidden');
+      statusFeedback.innerHTML = '';
+    }
+
+    function updateConfirmationStrip(ra, dec, mode, epochs) {
+      if (!resolvedConfirmationStrip) return;
+      const sign = dec >= 0 ? '+' : '';
+      if (resolvedData) resolvedData.textContent = `RA ${ra.toFixed(4)}° · Dec ${sign}${dec.toFixed(4)}°`;
+      if (resolvedMode) resolvedMode.textContent = mode === 'earth' ? 'Earth Location' : 'Sky RA/Dec';
+      if (resolvedEpochs) resolvedEpochs.textContent = `${epochs} Epochs`;
+    }
+
+    async function handleTargetSubmit(e) {
+      if (e) e.preventDefault();
+      if (!targetInputBox) return;
+
+      const query = targetInputBox.value.trim();
+      if (!query) {
+        showStatusFeedback('error', 'Please enter target coordinates or location.');
+        return;
+      }
+
+      if (observeBtn) observeBtn.disabled = true;
+      showStatusFeedback('loading', `Resolving ${activeInputMode === 'sky' ? 'sky query' : 'earth location'} via /api/sky...`);
+
+      try {
+        let resolvedPayload = null;
+
+        // 1. Query existing backend endpoint /api/sky
+        try {
+          const response = await fetch(`/api/sky?q=${encodeURIComponent(query)}&mode=${encodeURIComponent(activeInputMode)}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.ra !== undefined && data.dec !== undefined) {
+              resolvedPayload = {
+                ra: parseFloat(data.ra),
+                dec: parseFloat(data.dec),
+                mode: data.mode || activeInputMode,
+                epochs: data.epochs || data.epochsCount || 3,
+                name: data.target_name || data.name || query
+              };
+            }
+          }
+        } catch (networkErr) {
+          // Fall through to client resolution fallback when served standalone
+        }
+
+        // 2. Client-side resolution fallback
+        if (!resolvedPayload) {
+          const qLower = query.toLowerCase().trim();
+          if (activeInputMode === 'sky') {
+            for (const key of Object.keys(BENCHMARKS)) {
+              if (qLower.includes(key) || BENCHMARKS[key].name.toLowerCase().includes(qLower)) {
+                const b = BENCHMARKS[key];
+                const raVal = key === 'barnard' ? 269.4521 : key === 'wise0855' ? 133.7862 : key === 'epsindi' ? 330.8404 : key === 'rwaura' ? 77.0125 : 247.5500;
+                const decVal = key === 'barnard' ? 4.6934 : key === 'wise0855' ? -7.2443 : key === 'epsindi' ? -56.7860 : key === 'rwaura' ? 30.4011 : 66.7022;
+                resolvedPayload = { ra: raVal, dec: decVal, mode: 'sky', epochs: 3, name: b.name, targetKey: key };
+                break;
+              }
+            }
+            if (!resolvedPayload) {
+              const coordsMatch = query.match(/^([+-]?\d+(?:\.\d+)?)[,\s]+([+-]?\d+(?:\.\d+)?)$/);
+              if (coordsMatch) {
+                const raVal = parseFloat(coordsMatch[1]);
+                const decVal = parseFloat(coordsMatch[2]);
+                if (raVal >= 0 && raVal <= 360 && decVal >= -90 && decVal <= 90) {
+                  resolvedPayload = { ra: raVal, dec: decVal, mode: 'sky', epochs: 3, name: `Source [${raVal.toFixed(2)}, ${decVal.toFixed(2)}]` };
+                }
+              }
+            }
+          } else {
+            // Earth mode lookup
+            const cities = {
+              "ahmedabad": { ra: 269.4521, dec: 4.6934, name: "Ahmedabad, India (Zenith Projected)", epochs: 3 },
+              "greenwich": { ra: 180.1250, dec: 51.5074, name: "Greenwich Observatory, UK", epochs: 3 },
+              "london": { ra: 180.1250, dec: 51.5074, name: "London, UK", epochs: 3 },
+              "tokyo": { ra: 139.6503, dec: 35.6762, name: "Tokyo, Japan", epochs: 3 },
+              "pasadena": { ra: 241.8555, dec: 34.1478, name: "NASA JPL, Pasadena, USA", epochs: 4 }
+            };
+            for (const c of Object.keys(cities)) {
+              if (qLower.includes(c)) {
+                resolvedPayload = cities[c];
+                resolvedPayload.mode = 'earth';
+                break;
+              }
+            }
+            if (!resolvedPayload) {
+              const latLonMatch = query.match(/^([+-]?\d+(?:\.\d+)?)[,\s]+([+-]?\d+(?:\.\d+)?)$/);
+              if (latLonMatch) {
+                const lat = parseFloat(latLonMatch[1]);
+                const lon = parseFloat(latLonMatch[2]);
+                if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                  resolvedPayload = {
+                    ra: parseFloat(((lon + 360) % 360).toFixed(4)),
+                    dec: parseFloat(lat.toFixed(4)),
+                    mode: 'earth',
+                    epochs: 3,
+                    name: `Earth (${lat.toFixed(2)}°, ${lon.toFixed(2)}°)`
+                  };
+                }
+              }
+            }
+          }
+        }
+
+        if (!resolvedPayload) {
+          throw new Error(`Unable to resolve "${query}" for ${activeInputMode === 'sky' ? 'Sky RA/Dec' : 'Earth Location'}.`);
+        }
+
+        // Apply resolved target
+        updateConfirmationStrip(resolvedPayload.ra, resolvedPayload.dec, resolvedPayload.mode, resolvedPayload.epochs);
+        if (resolvedPayload.targetKey && BENCHMARKS[resolvedPayload.targetKey]) {
+          selectTarget(resolvedPayload.targetKey);
+        } else {
+          document.getElementById('headerTargetName').textContent = resolvedPayload.name;
+          document.getElementById('headerTargetCoords').textContent = `RA ${resolvedPayload.ra.toFixed(4)}° / Dec ${resolvedPayload.dec >= 0 ? '+' : ''}${resolvedPayload.dec.toFixed(4)}°`;
+          document.getElementById('hudTargetName').textContent = resolvedPayload.name;
+          document.getElementById('hudRaDec').textContent = `RA ${resolvedPayload.ra.toFixed(4)}° / Dec ${resolvedPayload.dec >= 0 ? '+' : ''}${resolvedPayload.dec.toFixed(4)}°`;
+        }
+        clearStatusFeedback();
+
+      } catch (err) {
+        showStatusFeedback('error', err.message || 'Resolution failed.');
+      } finally {
+        if (observeBtn) observeBtn.disabled = false;
+      }
+    }
+
+    if (targetInputForm) targetInputForm.addEventListener('submit', handleTargetSubmit);
+    if (observeBtn) observeBtn.addEventListener('click', handleTargetSubmit);
+
+    // ----------------------------------------------------
+    // 2. STARFIELD ENGINE (HTML5 CANVAS WITH REAL BLINK)
+    // ----------------------------------------------------
+    const starCanvas = document.getElementById('starCanvas');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const reticleBox = document.getElementById('reticleBox');
+    const reticleCard = document.getElementById('reticleCard');
+    const cursorRaDecHud = document.getElementById('cursorRaDecHud');
+
+    let canvasWidth = 0;
+    let canvasHeight = 0;
+    let backgroundStars = [];
+    let movingStar = {
+      x1: 0, y1: 0,
+      x2: 0, y2: 0,
+      radius: 3.5
+    };
+    const TOTAL_BLINK_FRAMES = 6; // 6 progressive survey frames (0.0 to 6.0 months)
+    let currentBlinkFrame = 0;
+    let isReticleLocked = false;
+    let mousePos = { x: 0, y: 0 };
+
+    function updateMovingStarTrajectory() {
+      // Big, prominent 140px pathway across the canvas
+      const pathLength = 140;
+      // Convert astronomical Position Angle (PA) to canvas coordinates:
+      // PA = 0° is North (up: -Y), PA = 90° is East (right: +X)
+      const paRad = (curTarget.pa * Math.PI) / 180;
+      const dx = pathLength * Math.sin(paRad);
+      const dy = -pathLength * Math.cos(paRad);
+
+      movingStar.x1 = canvasWidth * 0.48;
+      movingStar.y1 = canvasHeight * 0.60;
+      movingStar.x2 = movingStar.x1 + dx;
+      movingStar.y2 = movingStar.y1 + dy;
+    }
+
+    function generateStars() {
+      backgroundStars = [];
+      const count = 350;
+      for (let i = 0; i < count; i++) {
+        backgroundStars.push({
+          x: Math.random() * canvasWidth,
+          y: Math.random() * canvasHeight,
+          radius: Math.random() * 1.5 + 0.3,
+          alpha: Math.random() * 0.7 + 0.3,
+          color: Math.random() > 0.85 ? '#93C5FD' : '#E2E8F0'
+        });
+      }
+
+      updateMovingStarTrajectory();
+    }
+
+    function drawFrameBracket(ctx, x, y, size, color, lineWidth = 1.5) {
+      const hs = size / 2;
+      const cs = Math.max(3, size * 0.28);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      // Top-Left
+      ctx.moveTo(x - hs, y - hs + cs);
+      ctx.lineTo(x - hs, y - hs);
+      ctx.lineTo(x - hs + cs, y - hs);
+      // Top-Right
+      ctx.moveTo(x + hs - cs, y - hs);
+      ctx.lineTo(x + hs, y - hs);
+      ctx.lineTo(x + hs, y - hs + cs);
+      // Bottom-Left
+      ctx.moveTo(x - hs, y + hs - cs);
+      ctx.lineTo(x - hs, y + hs);
+      ctx.lineTo(x - hs + cs, y + hs);
+      // Bottom-Right
+      ctx.moveTo(x + hs - cs, y + hs);
+      ctx.lineTo(x + hs, y + hs);
+      ctx.lineTo(x + hs, y + hs - cs);
+      ctx.stroke();
+    }
+
+    function renderStarfield() {
+      if (!starCanvas) return;
+      const ctx = starCanvas.getContext('2d');
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+      // Deep space background with subtle nebular dust
+      ctx.fillStyle = '#0A0A0B';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+      // Draw stationary background stars (unaffected by proper motion)
+      for (const s of backgroundStars) {
+        ctx.fillStyle = s.color;
+        ctx.globalAlpha = s.alpha;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
+
+      // ----------------------------------------------------
+      // OBSERVATION MODES
+      // ----------------------------------------------------
+      if (observationMode === 'blink') {
+        // --------------------------------------------------
+        // PROPER MOTION PATHWAY CORRIDOR (ONLY IN BLINK MODE)
+        // --------------------------------------------------
+        // Translucent luminous wide corridor
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.14)';
+        ctx.lineWidth = 26;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(movingStar.x1, movingStar.y1);
+        ctx.lineTo(movingStar.x2, movingStar.y2);
+        ctx.stroke();
+
+        // Sharp dashed trajectory track
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(movingStar.x1, movingStar.y1);
+        ctx.lineTo(movingStar.x2, movingStar.y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Directional Arrowhead at Epoch 2
+        const angle = Math.atan2(movingStar.y2 - movingStar.y1, movingStar.x2 - movingStar.x1);
+        ctx.fillStyle = '#F59E0B';
+        ctx.beginPath();
+        ctx.moveTo(movingStar.x2, movingStar.y2);
+        ctx.lineTo(movingStar.x2 - 14 * Math.cos(angle - Math.PI / 6), movingStar.y2 - 14 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(movingStar.x2 - 14 * Math.cos(angle + Math.PI / 6), movingStar.y2 - 14 * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+
+        // Pathway metadata label
+        ctx.font = '10px "JetBrains Mono"';
+        ctx.fillStyle = '#F59E0B';
+        ctx.textAlign = 'left';
+        ctx.fillText(`PROPER MOTION PATHWAY: ${curTarget.pm} [PA ${curTarget.pa}°]`, movingStar.x1 + 16, (movingStar.y1 + movingStar.y2) / 2);
+
+        // --------------------------------------------------
+        // PROGRESSIVE SURVEY FRAMES (FRAME-BY-FRAME IN BLINK)
+        // --------------------------------------------------
+        for (let f = 0; f < TOTAL_BLINK_FRAMES; f++) {
+          const progress = f / (TOTAL_BLINK_FRAMES - 1);
+          const fx = movingStar.x1 + (movingStar.x2 - movingStar.x1) * progress;
+          const fy = movingStar.y1 + (movingStar.y2 - movingStar.y1) * progress;
+          const monthDelta = (progress * 6.0).toFixed(1);
+
+          const isCurrent = (f === currentBlinkFrame);
+          const isPast = (f < currentBlinkFrame);
+
+          if (isCurrent) {
+            // ACTIVE FRAME: Prominent glowing astrometric frame box
+            drawFrameBracket(ctx, fx, fy, 26, '#06B6D4', 2);
+
+            // Radiant centroid glow
+            const grad = ctx.createRadialGradient(fx, fy, 1, fx, fy, 18);
+            grad.addColorStop(0, '#06B6D4');
+            grad.addColorStop(0.4, 'rgba(6, 182, 212, 0.45)');
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(fx, fy, 18, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Bright white central star core
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(fx, fy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Live frame readout tag
+            ctx.font = 'bold 11px "JetBrains Mono"';
+            ctx.fillStyle = '#06B6D4';
+            ctx.fillText(`FRAME ${f + 1}/${TOTAL_BLINK_FRAMES} [t = +${monthDelta} mo]`, fx + 18, fy - 8);
+          } else if (isPast) {
+            // Historical frame trail (shows pathway already traveled)
+            ctx.fillStyle = 'rgba(245, 158, 11, 0.45)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            drawFrameBracket(ctx, fx, fy, 14, 'rgba(245, 158, 11, 0.3)', 1);
+          } else {
+            // Projected upcoming frame step
+            drawFrameBracket(ctx, fx, fy, 14, 'rgba(255, 255, 255, 0.18)', 1);
+          }
+
+          // Endpoint annotations
+          if (f === 0 && !isCurrent) {
+            ctx.font = '9px "JetBrains Mono"';
+            ctx.fillStyle = '#06B6D4';
+            ctx.fillText('Epoch 1 (0.0 mo)', fx - 95, fy + 4);
+          }
+          if (f === TOTAL_BLINK_FRAMES - 1 && !isCurrent) {
+            ctx.font = '9px "JetBrains Mono"';
+            ctx.fillStyle = '#F59E0B';
+            ctx.fillText('Epoch 2 (+6.0 mo)', fx + 18, fy + 4);
+          }
+        }
+      } else if (observationMode === 'single') {
+        // Side-by-Side Dual Epochs (clean stars, NO pathway corridor)
+        drawStarSource(ctx, movingStar.x1, movingStar.y1, '#06B6D4', 'Epoch 1 (t = 0 mo)');
+        drawStarSource(ctx, movingStar.x2, movingStar.y2, '#F59E0B', 'Epoch 2 (t = +6 mo)');
+      } else if (observationMode === 'diff') {
+        // Difference Mode (Epoch 2 - Epoch 1 dipole, NO pathway corridor)
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.25)';
+        ctx.beginPath();
+        ctx.arc(movingStar.x1, movingStar.y1, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#06B6D4';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        drawFrameBracket(ctx, movingStar.x1, movingStar.y1, 22, '#06B6D4');
+
+        // Positive emission dipole at Epoch 2
+        ctx.fillStyle = '#F59E0B';
+        ctx.beginPath();
+        ctx.arc(movingStar.x2, movingStar.y2, 5, 0, Math.PI * 2);
+        ctx.fill();
+        drawFrameBracket(ctx, movingStar.x2, movingStar.y2, 22, '#F59E0B');
+
+        ctx.font = '10px "JetBrains Mono"';
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillText('Dipole Residual (E2 − E1)', movingStar.x2 + 16, movingStar.y2 + 4);
+      }
+    }
+
+    function drawStarSource(ctx, x, y, color, label) {
+      // Glow circle
+      const grad = ctx.createRadialGradient(x, y, 1, x, y, 14);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sharp central core
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frame bracket around star source
+      drawFrameBracket(ctx, x, y, 20, color, 1.5);
+
+      // Label
+      ctx.font = '10px "JetBrains Mono"';
+      ctx.fillStyle = color;
+      ctx.fillText(label, x + 14, y - 6);
+    }
+
+    function startBlinkCycle() {
+      if (blinkIntervalId) clearInterval(blinkIntervalId);
+      if (observationMode !== 'blink') return;
+
+      const intervalMs = 1000 / blinkFps;
+      blinkIntervalId = setInterval(() => {
+        currentBlinkFrame = (currentBlinkFrame + 1) % TOTAL_BLINK_FRAMES;
+        renderStarfield();
+
+        // Update live HUD badges
+        if (blinkFpsHud) {
+          blinkFpsHud.textContent = `FRAME ${currentBlinkFrame + 1}/${TOTAL_BLINK_FRAMES} · ${blinkFps.toFixed(1)} FPS`;
+        }
+        if (activeModeLabel && observationMode === 'blink') {
+          activeModeLabel.textContent = `Frame-by-Frame Blink (Frame ${currentBlinkFrame + 1}/${TOTAL_BLINK_FRAMES} @ ${blinkFps.toFixed(1)} FPS)`;
+        }
+      }, intervalMs);
+    }
+
+    // Canvas Mouse Interaction & Reticle
+    canvasContainer.addEventListener('mousemove', (e) => {
+      const rect = starCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      mousePos = { x, y };
+
+      // Update Cursor RA/Dec HUD
+      const approxRaHour = Math.floor((x / canvasWidth) * 24);
+      const approxDecDeg = Math.floor((1 - (y / canvasHeight)) * 90);
+      cursorRaDecHud.textContent = `RA: ${approxRaHour}h ${Math.floor((x%60))}m · DEC: +${approxDecDeg}°`;
+
+      if (!isReticleLocked) {
+        reticleBox.style.display = 'block';
+        reticleBox.style.left = `${x}px`;
+        reticleBox.style.top = `${y}px`;
+      }
+    });
+
+    canvasContainer.addEventListener('mouseleave', () => {
+      if (!isReticleLocked) {
+        reticleBox.style.display = 'none';
+      }
+    });
+
+    // Clicking locks reticle onto moving star or nearest source & shows HUD Card exactly aside
+    canvasContainer.addEventListener('click', (e) => {
+      const rect = starCanvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      // Distance to active mover target
+      const activeProgress = currentBlinkFrame / (TOTAL_BLINK_FRAMES - 1);
+      const targetPos = {
+        x: movingStar.x1 + (movingStar.x2 - movingStar.x1) * activeProgress,
+        y: movingStar.y1 + (movingStar.y2 - movingStar.y1) * activeProgress
+      };
+      const distToTarget = Math.hypot(clickX - targetPos.x, clickY - targetPos.y);
+
+      // Distance to pathway line segment
+      const dxL = movingStar.x2 - movingStar.x1;
+      const dyL = movingStar.y2 - movingStar.y1;
+      const lenSq = dxL * dxL + dyL * dyL;
+      let param = lenSq > 0 ? ((clickX - movingStar.x1) * dxL + (clickY - movingStar.y1) * dyL) / lenSq : -1;
+      param = Math.max(0, Math.min(1, param));
+      const projX = movingStar.x1 + param * dxL;
+      const projY = movingStar.y1 + param * dyL;
+      const distToPathway = Math.hypot(clickX - projX, clickY - projY);
+
+      if (distToTarget < 50 || distToPathway < 35 || !isReticleLocked) {
+        // Lock reticle on target
+        isReticleLocked = true;
+        reticleBox.style.display = 'block';
+        reticleBox.style.left = `${targetPos.x}px`;
+        reticleBox.style.top = `${targetPos.y}px`;
+
+        // Position HUD card EXACTLY ASIDE of that crosshair
+        positionReticleCard(targetPos.x, targetPos.y);
+        updateReticleCardData(curTarget);
+      } else {
+        // Unlock
+        isReticleLocked = false;
+        reticleCard.style.display = 'none';
+        reticleBox.style.left = `${clickX}px`;
+        reticleBox.style.top = `${clickY}px`;
+      }
+    });
+
+    function positionReticleCard(cx, cy) {
+      reticleCard.style.display = 'block';
+      let cardX = cx + 24;
+      let cardY = cy - 20;
+
+      // Clamp so it does not overflow viewport bounds
+      const cardWidth = 280;
+      const cardHeight = 220;
+      if (cardX + cardWidth > canvasWidth - 10) {
+        cardX = cx - cardWidth - 24;
+      }
+      if (cardY + cardHeight > canvasHeight - 10) {
+        cardY = canvasHeight - cardHeight - 10;
+      }
+      if (cardY < 10) cardY = 10;
+
+      reticleCard.style.left = `${cardX}px`;
+      reticleCard.style.top = `${cardY}px`;
+    }
+
+    function updateReticleCardData(target) {
+      document.getElementById('hudTargetName').textContent = target.name;
+      document.getElementById('hudTargetType').textContent = target.type;
+      document.getElementById('hudTargetPm').textContent = `${target.pm} (PA ${target.pa}°)`;
+      document.getElementById('hudTargetCoords').textContent = `${target.ra.split(' ')[0]} ${target.ra.split(' ')[1]} · ${target.dec.split(' ')[0]}`;
+      document.getElementById('hudTargetDisplacement').textContent = target.displacement;
+
+      const badgeElem = document.getElementById('hudTargetBadge');
+      badgeElem.textContent = target.badge;
+      if (target.badgeColor === 'amber') {
+        badgeElem.className = 'text-[9px] px-1.5 py-0.5 rounded bg-amber-candidate/20 text-amber-candidate border border-amber-candidate/40 font-semibold uppercase';
+      } else {
+        badgeElem.className = 'text-[9px] px-1.5 py-0.5 rounded bg-cyan-reticle/20 text-cyan-reticle border border-cyan-reticle/40 font-semibold uppercase';
+      }
+
+      // Sync Header
+      document.getElementById('headerTargetName').textContent = target.name;
+      document.getElementById('headerTargetCoords').textContent = `${target.ra} / ${target.dec}`;
+    }
+
+    // ----------------------------------------------------
+    // 3. 102-BAND SED SPECTRAL PLOT (0.75 - 5.0 µm)
+    // ----------------------------------------------------
+    const sedCanvas = document.getElementById('sedCanvas');
+    const sedHoverBadge = document.getElementById('sedHoverBadge');
+    const sedHoverWavelength = document.getElementById('sedHoverWavelength');
+    const sedHoverFlux = document.getElementById('sedHoverFlux');
+
+    function renderSEDPlot() {
+      if (!sedCanvas) return;
+      const w = sedCanvas.parentElement.clientWidth - 32;
+      const h = sedCanvas.parentElement.clientHeight - 32;
+      sedCanvas.width = w;
+      sedCanvas.height = h;
+
+      const ctx = sedCanvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      const padL = 45;
+      const padR = 20;
+      const padT = 30;
+      const padB = 35;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+
+      // Draw Grid Lines & Hairline Axes
+      ctx.strokeStyle = '#222226';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i <= 5; i++) {
+        const y = padT + (plotH / 5) * i;
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + plotW, y);
+      }
+      ctx.stroke();
+
+      // Axis labels (Wavelength µm)
+      ctx.font = '10px "JetBrains Mono"';
+      ctx.fillStyle = '#8E8E93';
+      ctx.textAlign = 'center';
+      const wlTicks = [0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
+      for (const wl of wlTicks) {
+        const x = padL + ((wl - 0.75) / (5.0 - 0.75)) * plotW;
+        ctx.fillText(`${wl}µm`, x, h - 12);
+        ctx.beginPath();
+        ctx.moveTo(x, padT + plotH);
+        ctx.lineTo(x, padT + plotH + 4);
+        ctx.stroke();
+      }
+
+      // Y-axis Flux label
+      ctx.textAlign = 'right';
+      ctx.fillText('1.0', padL - 8, padT + 8);
+      ctx.fillText('0.5', padL - 8, padT + plotH / 2 + 4);
+      ctx.fillText('0.0', padL - 8, padT + plotH);
+
+      // Molecular Absorption Band Markers (Vertical dotted callouts)
+      const molecularBands = [
+        { name: 'H₂O (1.4µm)', wl: 1.40, color: '#06B6D4' },
+        { name: 'CH₄ (1.66µm)', wl: 1.66, color: '#F59E0B' },
+        { name: 'CO₂ (2.0µm)', wl: 2.00, color: '#A855F7' },
+        { name: 'H₂O Ice (3.05µm)', wl: 3.05, color: '#06B6D4' },
+        { name: 'CO₂ (4.27µm)', wl: 4.27, color: '#A855F7' },
+        { name: 'CO (4.67µm)', wl: 4.67, color: '#10B981' }
+      ];
+
+      for (const m of molecularBands) {
+        const mx = padL + ((m.wl - 0.75) / (5.0 - 0.75)) * plotW;
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(mx, padT);
+        ctx.lineTo(mx, padT + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = m.color;
+        ctx.font = '9px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText(m.name, mx, padT - 8);
+      }
+
+      // Generate 102 Spectral Bands SED Curve
+      ctx.strokeStyle = '#06B6D4';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      const numBands = 102;
+      for (let i = 0; i < numBands; i++) {
+        const wl = 0.75 + (i / (numBands - 1)) * (5.0 - 0.75);
+        const x = padL + ((wl - 0.75) / (5.0 - 0.75)) * plotW;
+
+        // Realistic stellar / brown dwarf Planck curve + absorption dips
+        const planck = curTarget.sedBaseline * Math.exp(-Math.pow((wl - 1.8) / 1.6, 2));
+        let absorption = 0;
+
+        // 3.05µm Ice dip
+        absorption += curTarget.iceDip * Math.exp(-Math.pow((wl - 3.05) / 0.18, 2));
+        // 1.4µm H2O dip
+        absorption += 0.22 * Math.exp(-Math.pow((wl - 1.40) / 0.12, 2));
+        // 4.27µm CO2 dip
+        absorption += 0.30 * Math.exp(-Math.pow((wl - 4.27) / 0.15, 2));
+
+        const flux = Math.max(0.05, planck - absorption + (Math.sin(i * 1.2) * 0.015));
+        const y = padT + plotH - (flux * plotH);
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // SED Plot Hover Readout
+    sedCanvas.addEventListener('mousemove', (e) => {
+      const rect = sedCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const padL = 45;
+      const padR = 20;
+      const plotW = sedCanvas.width - padL - padR;
+
+      if (x >= padL && x <= padL + plotW) {
+        const wl = 0.75 + ((x - padL) / plotW) * (5.0 - 0.75);
+        sedHoverBadge.classList.remove('hidden');
+        sedHoverWavelength.textContent = `λ: ${wl.toFixed(2)} µm`;
+        const approxFlux = (curTarget.sedBaseline * (1 - 0.3 * Math.sin(wl * 2))).toFixed(3);
+        sedHoverFlux.textContent = `Flux: ${approxFlux} Jy`;
+      } else {
+        sedHoverBadge.classList.add('hidden');
+      }
+    });
+
+    sedCanvas.addEventListener('mouseleave', () => {
+      sedHoverBadge.classList.add('hidden');
+    });
+
+    // ----------------------------------------------------
+    // 4. CSV DATA EXPORT GENERATOR
+    // ----------------------------------------------------
+    document.getElementById('downloadCsvBtn').addEventListener('click', () => {
+      let csvContent = "data:text/csv;charset=utf-8,Band_Index,Wavelength_um,Target_Name,Flux_Jy,Flux_Error_Jy,Instrument_Array\n";
+      for (let i = 1; i <= 102; i++) {
+        const wl = (0.75 + ((i - 1) / 101) * 4.25).toFixed(4);
+        const flux = (0.85 * Math.exp(-Math.pow((wl - 1.8) / 1.6, 2)) + (Math.random() * 0.02 - 0.01)).toFixed(5);
+        const err = (0.005 + Math.random() * 0.003).toFixed(5);
+        const arrayIdx = Math.min(6, Math.floor((i - 1) / 17) + 1);
+        csvContent += `${i},${wl},${curTarget.name.replace(/,/g,'')},${flux},${err},LVF-${arrayIdx}\n`;
+      }
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `SPHEREx_102Band_${curTargetKey}_SED.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+
+    // ----------------------------------------------------
+    // 5. VIEWING MODE SELECTOR & FPS CONTROLS
+    // ----------------------------------------------------
+    const viewModeFab = document.getElementById('viewModeFab');
+    const viewMenuModal = document.getElementById('viewMenuModal');
+    const modeBlinkBtn = document.getElementById('modeBlinkBtn');
+    const modeSingleBtn = document.getElementById('modeSingleBtn');
+    const modeDiffBtn = document.getElementById('modeDiffBtn');
+    const fpsSlider = document.getElementById('fpsSlider');
+    const fpsValDisplay = document.getElementById('fpsValDisplay');
+    const blinkFpsHud = document.getElementById('blinkFpsHud');
+    const activeModeLabel = document.getElementById('activeModeLabel');
+
+    viewModeFab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewMenuModal.style.display = viewMenuModal.style.display === 'flex' ? 'none' : 'flex';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!viewMenuModal.contains(e.target) && e.target !== viewModeFab) {
+        viewMenuModal.style.display = 'none';
+      }
+    });
+
+    function setObservationMode(mode) {
+      observationMode = mode;
+      viewMenuModal.style.display = 'none';
+
+      // Update UI active styles
+      modeBlinkBtn.className = mode === 'blink' ? 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-panel-elevated text-xs font-mono flex items-center justify-between text-cyan-reticle' : 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono text-text-muted hover:text-text-primary';
+      modeSingleBtn.className = mode === 'single' ? 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-panel-elevated text-xs font-mono flex items-center justify-between text-cyan-reticle' : 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono text-text-muted hover:text-text-primary';
+      modeDiffBtn.className = mode === 'diff' ? 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-panel-elevated text-xs font-mono flex items-center justify-between text-cyan-reticle' : 'w-full text-left btn px-2.5 py-1.5 rounded hairline bg-canvas-dark text-xs font-mono text-text-muted hover:text-text-primary';
+
+      if (mode === 'blink') {
+        activeModeLabel.textContent = `Frame-by-Frame Blink (Frame ${currentBlinkFrame + 1}/${TOTAL_BLINK_FRAMES} @ ${blinkFps.toFixed(1)} FPS)`;
+        startBlinkCycle();
+      } else if (mode === 'single') {
+        if (blinkIntervalId) clearInterval(blinkIntervalId);
+        activeModeLabel.textContent = "Side-by-Side Dual Epochs & Vector";
+        renderStarfield();
+      } else if (mode === 'diff') {
+        if (blinkIntervalId) clearInterval(blinkIntervalId);
+        activeModeLabel.textContent = "Difference Imaging (Epoch 2 − Epoch 1)";
+        renderStarfield();
+      }
+    }
+
+    modeBlinkBtn.addEventListener('click', () => setObservationMode('blink'));
+    modeSingleBtn.addEventListener('click', () => setObservationMode('single'));
+    modeDiffBtn.addEventListener('click', () => setObservationMode('diff'));
+
+    fpsSlider.addEventListener('input', (e) => {
+      blinkFps = parseFloat(e.target.value);
+      fpsValDisplay.textContent = `${blinkFps.toFixed(1)} FPS`;
+      blinkFpsHud.textContent = `FRAME ${currentBlinkFrame + 1}/${TOTAL_BLINK_FRAMES} · ${blinkFps.toFixed(1)} FPS`;
+      if (observationMode === 'blink') {
+        startBlinkCycle();
+        activeModeLabel.textContent = `Frame-by-Frame Blink (Frame ${currentBlinkFrame + 1}/${TOTAL_BLINK_FRAMES} @ ${blinkFps.toFixed(1)} FPS)`;
+      }
+    });
+
+    // ----------------------------------------------------
+    // AI COPILOT CHATBOT (SPHEREx Analyzer AI)
+    // ----------------------------------------------------
+    const aiBotFab = document.getElementById('aiBotFab');
+    const aiChatDrawer = document.getElementById('aiChatDrawer');
+    const closeAiChatBtn = document.getElementById('closeAiChatBtn');
+    const hudAiQueryBtn = document.getElementById('hudAiQueryBtn');
+    const aiChatInput = document.getElementById('aiChatInput');
+    const aiSendBtn = document.getElementById('aiSendBtn');
+    const aiMessagesList = document.getElementById('aiMessagesList');
+
+    function toggleAiDrawer() {
+      aiChatDrawer.style.display = aiChatDrawer.style.display === 'flex' ? 'none' : 'flex';
+      if (aiChatDrawer.style.display === 'flex') {
+        viewMenuModal.style.display = 'none';
+        aiChatInput.focus();
+      }
+    }
+
+    if (aiBotFab) aiBotFab.addEventListener('click', toggleAiDrawer);
+    if (closeAiChatBtn) closeAiChatBtn.addEventListener('click', toggleAiDrawer);
+    if (hudAiQueryBtn) {
+      hudAiQueryBtn.addEventListener('click', () => {
+        aiChatDrawer.style.display = 'flex';
+        viewMenuModal.style.display = 'none';
+        askAiQuestion(`Analyze telemetry for ${curTarget.name}`);
+      });
+    }
+
+    function addChatMessage(sender, text) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = sender === 'user'
+        ? 'p-2 rounded bg-panel-elevated hairline border-border-dark text-text-primary text-right self-end ml-6'
+        : 'p-2.5 rounded bg-canvas-dark hairline border-border-dark text-text-muted leading-relaxed';
+
+      if (sender === 'ai') {
+        msgDiv.innerHTML = `<span class="text-cyan-reticle font-bold block mb-1">SPHEREx AI TELEMETRY</span>${text}`;
+      } else {
+        msgDiv.textContent = text;
+      }
+
+      aiMessagesList.appendChild(msgDiv);
+      aiMessagesList.scrollTop = aiMessagesList.scrollHeight;
+    }
+
+    function askAiQuestion(query) {
+      addChatMessage('user', query);
+
+      setTimeout(() => {
+        let answer = "";
+        const lower = query.toLowerCase();
+
+        if (lower.includes('dipole') || lower.includes('vertical')) {
+          answer = `The vertical dipole indicates high proper motion along the declination axis (PA = ${curTarget.pa}°). Over the 6-month SPHEREx baseline, ${curTarget.name} displaced by ${curTarget.displacement}, leaving a negative residual at Epoch 1 coordinates and positive flux at Epoch 2.`;
+        } else if (lower.includes('ice') || lower.includes('3.05') || lower.includes('sed')) {
+          answer = `The absorption feature at 3.05 µm is the diagnostic O-H stretching band of solid H2O ice grains. SPHEREx detects this in cold outer circumstellar envelopes and ultra-cool brown dwarfs like ${curTarget.name} with depth ΔF/F = ${curTarget.iceDip}.`;
+        } else if (lower.includes('brown dwarf') || lower.includes('candidate')) {
+          answer = `${curTarget.name} is categorized as a ${curTarget.type}. Infrared color [1.50] - [3.40] > 1.2 and strong methane band depth confirm low effective temperature (Teff < 700K).`;
+        } else {
+          answer = `${curTarget.aiSummary} Parallax π = ${curTarget.parallax}. Kinematic confidence level: 99.8% (Gaia DR3 cross-matched).`;
+        }
+
+        addChatMessage('ai', answer);
+      }, 350);
+    }
+
+    if (aiSendBtn) {
+      aiSendBtn.addEventListener('click', () => {
+        const text = aiChatInput.value.trim();
+        if (!text) return;
+        aiChatInput.value = '';
+        askAiQuestion(text);
+      });
+    }
+
+    if (aiChatInput) {
+      aiChatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const text = aiChatInput.value.trim();
+          if (!text) return;
+          aiChatInput.value = '';
+          askAiQuestion(text);
+        }
+      });
+    }
+
+    document.querySelectorAll('.ai-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        askAiQuestion(chip.textContent);
+      });
+    });
+
+    // ----------------------------------------------------
+    // 6. TARGET SELECTION & BENCHMARK PICKER
+    // ----------------------------------------------------
+    function switchTarget(key) {
+      if (!BENCHMARKS[key]) return;
+      curTargetKey = key;
+      curTarget = BENCHMARKS[key];
+      currentBlinkFrame = 0;
+
+      document.getElementById('benchmarkSelector').value = key;
+      updateReticleCardData(curTarget);
+      updateMovingStarTrajectory();
+      renderStarfield();
+      renderSEDPlot();
+
+      // Automatically lock reticle on newly selected target
+      isReticleLocked = true;
+      const targetPos = { x: movingStar.x1, y: movingStar.y1 };
+      reticleBox.style.display = 'block';
+      reticleBox.style.left = `${targetPos.x}px`;
+      reticleBox.style.top = `${targetPos.y}px`;
+      positionReticleCard(targetPos.x, targetPos.y);
+    }
+
+    document.getElementById('benchmarkSelector').addEventListener('change', (e) => {
+      switchTarget(e.target.value);
+    });
+
+    document.querySelectorAll('.target-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const targetKey = card.getAttribute('data-target');
+        switchTarget(targetKey);
+        // Smooth scroll back to dashboard workbench
+        document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    // ----------------------------------------------------
+    // 8. RESIZING & INITIALIZATION
+    // ----------------------------------------------------
+    function resizeCanvases() {
+      if (!starCanvas) return;
+      canvasWidth = starCanvas.parentElement.clientWidth;
+      canvasHeight = starCanvas.parentElement.clientHeight;
+      starCanvas.width = canvasWidth;
+      starCanvas.height = canvasHeight;
+
+      generateStars();
+      renderStarfield();
+      renderSEDPlot();
+
+      if (isReticleLocked) {
+        const activeProgress = currentBlinkFrame / (TOTAL_BLINK_FRAMES - 1);
+        const targetPos = {
+          x: movingStar.x1 + (movingStar.x2 - movingStar.x1) * activeProgress,
+          y: movingStar.y1 + (movingStar.y2 - movingStar.y1) * activeProgress
+        };
+        reticleBox.style.left = `${targetPos.x}px`;
+        reticleBox.style.top = `${targetPos.y}px`;
+        positionReticleCard(targetPos.x, targetPos.y);
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvases);
+
+    // Initial boot
+    resizeCanvases();
+    startBlinkCycle();
+
+    // Auto-lock onto Barnard's Star on initial load so the reticle & card are immediately visible!
+    setTimeout(() => {
+      switchTarget('barnard');
+    }, 150);
+  </script>
+</body>
+</html>

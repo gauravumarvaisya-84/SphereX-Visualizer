@@ -1,110 +1,523 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#070a10">
-  <title>SPHEREx Mission Visualizer</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pioneer Matrix · SPHEREx Mission Visualizer</title>
+
+  <!-- Tailwind CSS CDN & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- NASA & Swiss Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Core Theme Variables & Custom Telemetry Styles -->
+  <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
-  <header class="topbar">
-    <a class="brand" href="#" aria-label="SPHEREx Mission Visualizer home">
-      <span class="brand-mark" aria-hidden="true">S</span>
-      <span><strong>SPHEREx</strong><small>MISSION VISUALIZER</small></span>
-    </a>
-    <div class="mission-status"><span class="status-dot"></span> OBSERVATORY ONLINE</div>
-  </header>
 
-  <main class="layout">
-    <section class="search-panel card" aria-labelledby="search-title">
-      <div class="eyebrow">TARGET RESOLUTION</div>
-      <h1 id="search-title">Explore the infrared sky</h1>
-      <p class="muted">Resolve a sky target or point the observatory at an Earth location.</p>
-      <div class="segmented" role="group" aria-label="Coordinate input type">
-        <button class="segment active" type="button" data-input-mode="sky" aria-pressed="true">Sky RA / Dec</button>
-        <button class="segment" type="button" data-input-mode="earth" aria-pressed="false">Earth location</button>
-      </div>
-      <form id="search-form">
-        <label for="target-query" id="query-label">Target name or RA, Dec</label>
-        <div class="search-row">
-          <input id="target-query" name="q" autocomplete="off" value="Barnard's Star"
-            placeholder="Barnard's Star, M101, or 269.452083, 4.693389" required>
-          <button class="button button-primary" type="submit">Observe <span aria-hidden="true">→</span></button>
+<body class="bg-[#0A0A0B] text-[#F4F4F6]">
+
+  <!-- ======================================================== -->
+  <!-- 1. SLIDING / EXTRACTABLE SIDEBAR                         -->
+  <!-- ======================================================== -->
+  <aside id="sideNav">
+    <!-- Sidebar Header with Interactive Logo (Acts as Slip-Back Button) -->
+    <div class="h-14 hairline-b flex items-center px-4">
+      <div id="sidebarLogoBtn" class="flex items-center cursor-pointer group" title="Click logo to slip sidebar back in">
+        <div class="relative flex items-center justify-center p-0.5 rounded-full border border-[#222226] bg-[#0A0A0B] group-hover:border-[#06B6D4] group-hover:shadow-[0_0_14px_rgba(6,182,212,0.4)] transition-all">
+          <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="SPHEREx Mission Logo" class="w-9 h-9 rounded-full object-cover" />
+          <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#06B6D4] border-2 border-[#121214]"></span>
         </div>
-        <p id="search-help" class="field-help">Decimal or sexagesimal coordinates, star and galaxy names.</p>
-      </form>
-      <div class="preset-area">
-        <div class="eyebrow">BENCHMARK TARGETS</div>
-        <div id="preset-list" class="preset-list" aria-label="Benchmark targets"></div>
       </div>
-      <div class="search-message" id="search-message" role="status" aria-live="polite"></div>
-      <div class="target-summary" id="target-summary" hidden></div>
+    </div>
+
+    <!-- Live Telemetry Status Badge -->
+    <div class="p-3 hairline-b bg-[#0A0A0B]/40 font-mono text-[11px] space-y-1">
+      <div class="flex items-center justify-between text-[#8E8E93]">
+        <span>IRSA TAP Link:</span>
+        <span class="text-emerald-400 font-semibold flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> ONLINE
+        </span>
+      </div>
+      <div class="flex items-center justify-between text-[#8E8E93]">
+        <span>Survey Cadence:</span>
+        <span class="text-[#F4F4F6] font-mono">6-Mo Epochs</span>
+      </div>
+      <div class="flex items-center justify-between text-[#8E8E93]">
+        <span>Spectral Bands:</span>
+        <span class="text-[#06B6D4] font-mono">102 (0.75–5.0µm)</span>
+      </div>
+    </div>
+
+    <!-- Navigation Menu (Smooth scroll to sections) -->
+    <nav class="flex-1 py-3 px-2 space-y-1 font-mono text-xs overflow-y-auto">
+      <a href="#dashboard" class="flex items-center gap-2.5 px-3 py-2 rounded text-[#F4F4F6] hover:bg-[#0A0A0B] hairline border-transparent hover:border-[#222226] transition-colors">
+        <i data-lucide="crosshair" class="w-4 h-4 text-[#06B6D4]"></i>
+        <span>Sky Visual Workbench</span>
+      </a>
+      <a href="#sed-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-[#8E8E93] hover:text-[#F4F4F6] hover:bg-[#0A0A0B] hairline border-transparent hover:border-[#222226] transition-colors">
+        <i data-lucide="activity" class="w-4 h-4 text-[#F59E0B]"></i>
+        <span>102-Band SED Spectrum</span>
+      </a>
+      <a href="#mission-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-[#8E8E93] hover:text-[#F4F4F6] hover:bg-[#0A0A0B] hairline border-transparent hover:border-[#222226] transition-colors">
+        <i data-lucide="satellite" class="w-4 h-4 text-blue-400"></i>
+        <span>Mission & Instruments</span>
+      </a>
+      <a href="#targets-section" class="flex items-center gap-2.5 px-3 py-2 rounded text-[#8E8E93] hover:text-[#F4F4F6] hover:bg-[#0A0A0B] hairline border-transparent hover:border-[#222226] transition-colors">
+        <i data-lucide="compass" class="w-4 h-4 text-purple-400"></i>
+        <span>Benchmark Catalog</span>
+      </a>
+    </nav>
+
+    <!-- Sidebar Footer -->
+    <div class="p-3 hairline-t bg-[#0A0A0B]/30 font-mono text-[10px] text-[#8E8E93] space-y-1">
+      <div>NASA Space Apps 2026</div>
+      <div class="text-[9px] text-[#8E8E93]/70">Caltech IRSA · SPHEREx Level 3</div>
+    </div>
+  </aside>
+
+  <!-- ======================================================== -->
+  <!-- 2. MAIN VIEWPORT & SCROLLABLE SECTIONS                  -->
+  <!-- ======================================================== -->
+  <div id="mainWrapper">
+
+    <!-- Top Telemetry Header -->
+    <header class="top-header">
+      <div class="flex items-center gap-3">
+        <!-- Logo click triggers extract/collapse of sidebar -->
+        <div id="headerLogoTrigger" class="flex items-center cursor-pointer group" title="Click logo to toggle navigation panel">
+          <div class="relative flex items-center justify-center p-0.5 rounded-full border border-[#222226] bg-[#0A0A0B] group-hover:border-[#06B6D4] group-hover:shadow-[0_0_14px_rgba(6,182,212,0.4)] transition-all">
+            <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="SPHEREx Mission Logo" class="w-9 h-9 rounded-full object-cover" />
+            <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#121214] animate-pulse" title="System Online"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Target & Telemetry Badges -->
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <div class="hidden sm:flex items-center gap-2 text-[#8E8E93]">
+          <span>Active Target:</span>
+          <span id="headerTargetName" class="text-[#06B6D4] font-semibold">Barnard's Star</span>
+        </div>
+        <div class="hidden md:flex items-center gap-2 text-[#8E8E93]">
+          <span>RA/Dec:</span>
+          <span id="headerTargetCoords" class="text-[#F4F4F6]">17h 57m 48.50s / +04° 41′ 36.2″</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ======================================================== -->
+    <!-- DEDICATED TWO-MODE TARGET INPUT BAR (Directly Above Sky) -->
+    <!-- ======================================================== -->
+    <section class="target-input-section" aria-label="Target Coordinates and Location Input">
+      <div class="target-input-main">
+
+        <!-- Two-Mode Segmented Switch -->
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-mono text-[#8E8E93] uppercase tracking-wider font-semibold">Observation Mode</span>
+          <div class="mode-segmented-switch" role="tablist">
+            <button id="tabModeSky" type="button" class="mode-tab-btn active" role="tab" aria-selected="true">
+              <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+              <span>Sky RA/Dec</span>
+            </button>
+            <button id="tabModeEarth" type="button" class="mode-tab-btn" role="tab" aria-selected="false">
+              <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+              <span>Earth Location</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Target Input Form -->
+        <form id="targetInputForm" class="target-form" onsubmit="return false;">
+          <div class="input-field-group">
+            <label id="targetInputLabel" for="targetInputBox" class="input-label-text">
+              Sky Coordinates (RA, Dec) or Object Name
+            </label>
+            <input
+              id="targetInputBox"
+              type="text"
+              class="input-box"
+              placeholder="e.g. 269.452, 4.693 or Barnard's Star"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <!-- Observe Action Button -->
+          <button id="observeBtn" type="button" class="observe-btn" title="Submit target query to backend /api/sky">
+            <span>Observe</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </form>
+      </div>
+
+      <!-- Inline Loading & Error Feedback Container -->
+      <div id="statusFeedback" class="status-feedback-container"></div>
+
+      <!-- Resolved Confirmation Strip (Directly Below Input) -->
+      <div id="resolvedConfirmationStrip" class="resolved-confirmation-strip">
+        <div class="flex items-center gap-3">
+          <span class="resolved-indicator">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Resolved:
+          </span>
+          <span id="resolvedData" class="resolved-values">RA 269.4521° · Dec +4.6934°</span>
+        </div>
+
+        <div class="flex items-center gap-4 text-xs font-mono">
+          <span class="text-[#8E8E93]">Mode: <strong id="resolvedMode" class="resolved-mode-badge font-semibold">Sky RA/Dec</strong></span>
+          <span class="text-[#222226]">|</span>
+          <span id="resolvedEpochs" class="text-emerald-400 font-semibold">3 Epochs</span>
+        </div>
+      </div>
     </section>
 
-    <section class="visual-panel card" aria-labelledby="visual-title">
-      <div class="panel-heading">
-        <div><div class="eyebrow">MULTI-EPOCH OBSERVATIONS</div><h2 id="visual-title">Sky cutout</h2></div>
-        <span class="pill" id="data-source">WAITING FOR TARGET</span>
+    <!-- ======================================================== -->
+    <!-- SECTION 1: HERO SKY CANVAS WORKBENCH                     -->
+    <!-- ======================================================== -->
+    <section id="dashboard" class="relative w-full bg-[#0A0A0B] flex flex-col overflow-hidden">
+      
+      <!-- Top Control Bar in Viewport -->
+      <div class="absolute top-3 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+        <!-- Mode Badge & Quick Benchmark Selector -->
+        <div class="flex items-center gap-2 pointer-events-auto">
+          <div class="px-2.5 py-1 rounded bg-[#121214]/90 hairline font-mono text-xs flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-[#06B6D4]"></span>
+            <span id="activeModeLabel" class="text-[#F4F4F6] font-medium">Frame-by-Frame Blink Corridor (Frame 1/6 @ 4.0 FPS)</span>
+          </div>
+          <select id="benchmarkSelector" class="bg-[#121214]/90 hairline rounded px-2.5 py-1 text-xs font-mono text-[#F4F4F6] focus:outline-none focus:border-[#06B6D4] cursor-pointer">
+            <option value="barnard">Barnard's Star (10.36″/yr)</option>
+            <option value="wise0855">WISE 0855-0714 (Brown Dwarf)</option>
+            <option value="epsindi">Epsilon Indi B (Binary Mover)</option>
+            <option value="rwaura">RW Aurigae (T Tauri IR)</option>
+            <option value="rdrac">R Draconis (Mira Variable)</option>
+          </select>
+        </div>
+
+        <!-- Coordinates HUD overlay -->
+        <div class="hidden md:flex items-center gap-2 font-mono text-[11px] bg-[#121214]/90 hairline px-3 py-1 rounded text-[#8E8E93] pointer-events-auto">
+          <span>CURSOR:</span>
+          <span id="cursorRaDecHud" class="text-[#06B6D4]">RA: 269.452° · DEC: +4.693°</span>
+          <span class="text-[#222226]">|</span>
+          <span id="blinkFpsHud">FRAME 1/6 · 4.0 FPS</span>
+        </div>
       </div>
-      <div class="view-tabs" role="tablist" aria-label="Sky image mode">
-        <button class="view-tab active" type="button" data-view="single" role="tab" aria-selected="true">Single Epoch</button>
-        <button class="view-tab" type="button" data-view="blink" role="tab" aria-selected="false">Blink Comparator</button>
-        <button class="view-tab" type="button" data-view="difference" role="tab" aria-selected="false">Difference E2 − E1</button>
+
+      <!-- Main Canvas for Interactive Stars, Blink & Difference Engine -->
+      <div id="canvasContainer" class="relative w-full h-full cursor-crosshair">
+        <canvas id="starCanvas" class="w-full h-full block"></canvas>
+
+        <!-- Precision Reticle Following Mouse -->
+        <div id="reticleBox">
+          <div class="reticle-corner reticle-tl"></div>
+          <div class="reticle-corner reticle-tr"></div>
+          <div class="reticle-corner reticle-bl"></div>
+          <div class="reticle-corner reticle-br"></div>
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="w-1.5 h-1.5 bg-[#06B6D4] rounded-full"></div>
+          </div>
+        </div>
+
+        <!-- DETAIL HUD CARD EXACTLY ASIDE THE CROSSHAIR -->
+        <div id="reticleCard" class="p-3 font-mono text-xs space-y-2">
+          <div class="flex items-start justify-between border-b border-[#222226] pb-2">
+            <div>
+              <div id="hudTargetName" class="font-bold text-[#F4F4F6] text-sm">Barnard's Star</div>
+              <div id="hudTargetType" class="text-[10px] text-[#8E8E93]">High-Proper-Motion M Dwarf</div>
+            </div>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-[#F59E0B] border border-amber-500/40 font-semibold uppercase">
+              Candidate
+            </span>
+          </div>
+
+          <div class="space-y-1 text-[11px] text-[#8E8E93]">
+            <div class="flex justify-between">
+              <span>J2000 RA/Dec:</span>
+              <span id="hudRaDec" class="text-[#F4F4F6] font-mono">17h 57m / +04° 41′</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Total Proper Motion:</span>
+              <span id="hudPmTotal" class="text-[#F59E0B] font-bold">10.36″/yr</span>
+            </div>
+            <div class="flex justify-between">
+              <span>3.05µm Ice Depth:</span>
+              <span id="hudIceDepth" class="text-[#06B6D4] font-bold">ΔF/F = 0.38</span>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="canvas-wrap">
-        <canvas id="sky-canvas" width="128" height="128" aria-label="SPHEREx infrared sky image"></canvas>
-        <div class="canvas-label" id="epoch-label">Awaiting observations</div>
-        <div class="canvas-hint">CLICK A PIXEL TO IDENTIFY</div>
-      </div>
-      <div class="blink-row" id="blink-controls" hidden>
-        <button class="button button-secondary" id="blink-toggle" type="button">Pause</button>
-        <label for="blink-speed">Blink speed <output id="blink-speed-value">2 fps</output></label>
-        <input id="blink-speed" type="range" min="1" max="8" value="2">
-      </div>
-      <div class="observation-meta" id="observation-meta">Load a target to render its epochs.</div>
-      <div class="dot-hud" id="dot-hud" aria-live="polite">Dot View: click the image to inspect a sky position.</div>
     </section>
 
-    <aside class="analyzer-panel card" aria-labelledby="analyzer-title">
-      <div class="panel-heading analyzer-heading">
-        <div><div class="eyebrow">MISSION ASSISTANT</div><h2 id="analyzer-title"></h2></div>
-        <span class="assistant-orb" aria-hidden="true">✦</span>
-      </div>
-      <label class="sr-only" for="assistant-name">Assistant display name</label>
-      <input class="assistant-name" id="assistant-name" maxlength="40" aria-label="Editable assistant name">
-      <label class="sr-only" for="analyzer-token">Analyzer access token</label>
-      <input class="assistant-name" id="analyzer-token" type="password" maxlength="256"
-        autocomplete="off" placeholder="Access token (only if your server requires one)"
-        aria-label="Analyzer access token">
-      <div class="quick-prompts">
-        <button class="prompt-chip" type="button" data-prompt="What am I looking at?">What am I looking at?</button>
-        <button class="prompt-chip" type="button" data-prompt="Why is this dot moving?">Why is it moving?</button>
-        <button class="prompt-chip" type="button" data-prompt="What can the spectrum tell us?">Read the spectrum</button>
-      </div>
-      <div class="chat-messages" id="chat-messages" aria-live="polite">
-        <div class="chat-message assistant-message"><span class="message-author"></span><p>Choose a target and ask me what the observations reveal.</p></div>
-      </div>
-      <div id="suggested-question" class="suggested-question"></div>
-      <form id="chat-form" class="chat-form">
-        <label class="sr-only" for="chat-input">Ask SPHEREx Analyzer</label>
-        <textarea id="chat-input" rows="2" maxlength="1000" placeholder="Ask about this target…" required></textarea>
-        <button class="button button-primary send-button" type="submit" aria-label="Send question">↑</button>
-      </form>
-      <p class="privacy-note">The access token is kept in this tab and sent only to your SPHEREx backend. Gemini receives only compact target metadata and recent chat turns; image pixels stay in this app.</p>
-    </aside>
+    <!-- ======================================================== -->
+    <!-- SECTION 2: 102-BAND SED SPECTRAL PLOT                    -->
+    <!-- ======================================================== -->
+    <section id="sed-section" class="py-16 px-6 md:px-12 bg-[#121214] hairline-t flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-6">
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#222226] pb-4">
+          <div>
+            <div class="font-orbitron text-xs font-semibold text-[#06B6D4] tracking-wider uppercase">102-Band Spectral Diagnostic</div>
+            <h2 class="text-2xl font-bold tracking-tight text-[#F4F4F6] mt-1 font-sans">Spectral Energy Distribution (0.75 – 5.0 µm)</h2>
+          </div>
+          <div class="flex items-center gap-3 text-xs font-mono text-[#8E8E93]">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-[#06B6D4] rounded-sm"></span> Continuum Flux</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-[#C084FC] rounded-sm"></span> 3.05µm H₂O Ice Trough</span>
+          </div>
+        </div>
 
-    <section class="spectrum-panel card" aria-labelledby="spectrum-title">
-      <div class="panel-heading">
-        <div><div class="eyebrow">SPECTRAL DIAGNOSTICS</div><h2 id="spectrum-title">102-Band SED</h2></div>
-        <span class="pill">0.75–5.0 µm</span>
+        <div class="relative w-full h-80 bg-[#0A0A0B] rounded-lg hairline p-4">
+          <canvas id="sedCanvas" class="w-full h-full block"></canvas>
+        </div>
       </div>
-      <canvas id="spectrum-canvas" width="900" height="240" aria-label="102-band spectral energy distribution"></canvas>
-      <div class="spectrum-legend"><span><i class="legend-line"></i> Relative flux</span><span>H₂O · CH₄ · CO₂ diagnostic regions</span></div>
     </section>
-  </main>
-  <footer>SPHEREx Mission Visualizer <span>·</span> Multi-epoch data exploration prototype</footer>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 3: MISSION PROFILE: SPHEREx (NASA OBSERVATORY)   -->
+    <!-- ======================================================== -->
+    <section id="mission-section" class="py-16 px-6 md:px-12 bg-[#0A0A0B] hairline-t flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-12">
+        
+        <!-- Hero Overview with Official Emblem Badge -->
+        <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8 pb-4 border-b border-[#222226]">
+          <div class="space-y-4 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-[#121214] hairline text-[11px] font-mono text-[#06B6D4] font-semibold">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                NASA ASTROPHYSICS • ACTIVE IN ORBIT (DR1 RELEASED NOV 2026)
+              </span>
+              <span class="px-2.5 py-1 rounded bg-[#121214] hairline text-[11px] font-mono text-[#8E8E93]">
+                Medium-Class Explorer (MIDEX)
+              </span>
+            </div>
+
+            <div class="space-y-1">
+              <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-[#F4F4F6] font-sans">
+                SPHEREx: Mapping the Cosmos in 102 Colors
+              </h2>
+              <div class="font-mono text-xs text-[#06B6D4] tracking-wide">
+                Spectro-Photometer for the History of the Universe, Epoch of Reionization, and Ices Explorer
+              </div>
+            </div>
+
+            <p class="text-sm text-[#8E8E93] font-sans leading-relaxed max-w-4xl">
+              SPHEREx is an all-sky near-infrared space observatory conducting the <strong class="text-[#F4F4F6]">first-ever all-sky near-infrared spectral survey</strong>. While flagship observatories like JWST function as cosmic microscopes—zooming into narrow target fields in extreme detail—SPHEREx functions as a wide-angle panoramic camera. Scanning the entire celestial sphere every six months, it maps hundreds of millions of galaxies and stars across 102 contiguous infrared wavelength bands.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono text-[#8E8E93]">
+              <span class="text-[#F4F4F6] font-medium">Lead Agencies & Partners:</span>
+              <span class="px-2 py-0.5 rounded bg-[#121214] hairline">NASA JPL</span>
+              <span class="px-2 py-0.5 rounded bg-[#121214] hairline">Caltech (PI: Jamie Bock)</span>
+              <span class="px-2 py-0.5 rounded bg-[#121214] hairline">BAE Systems</span>
+              <span class="px-2 py-0.5 rounded bg-[#121214] hairline">KASI (Korea)</span>
+              <span class="px-2 py-0.5 rounded bg-[#121214] hairline">SpaceX Falcon 9</span>
+            </div>
+          </div>
+
+          <!-- Official SPHEREx Mission Visualizer Badge -->
+          <div class="flex-shrink-0 flex flex-col items-center">
+            <div class="p-2.5 rounded-2xl bg-[#121214] hairline shadow-2xl relative group">
+              <div class="absolute -inset-1 bg-gradient-to-b from-[#06B6D4]/20 via-transparent to-[#F59E0B]/10 rounded-2xl blur-lg opacity-40 group-hover:opacity-75 transition duration-500"></div>
+              <img src="logo.jpg" alt="SPHEREx Mission Visualizer Official Badge" class="relative w-44 md:w-52 h-auto rounded-xl object-contain shadow-inner" />
+            </div>
+            <div class="mt-2 text-[10px] font-mono text-[#8E8E93] tracking-wider uppercase">Official Mission Insignia</div>
+          </div>
+        </div>
+
+        <!-- 6-KPI Stats Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Launch Date</div>
+            <div class="text-base font-bold text-[#F4F4F6]">Mar 11, 2025</div>
+            <div class="text-[10px] text-[#06B6D4]">SpaceX Falcon 9</div>
+          </div>
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Spectral Bands</div>
+            <div class="text-base font-bold text-[#06B6D4]">102 Colors</div>
+            <div class="text-[10px] text-[#8E8E93]">0.75 – 5.0 µm NIR</div>
+          </div>
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Galaxies Mapped</div>
+            <div class="text-base font-bold text-[#F4F4F6]">&gt; 450 Million</div>
+            <div class="text-[10px] text-[#F59E0B]">3D Cosmic Map</div>
+          </div>
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Stars Surveyed</div>
+            <div class="text-base font-bold text-[#F4F4F6]">&gt; 100 Million</div>
+            <div class="text-[10px] text-[#8E8E93]">Milky Way Galaxy</div>
+          </div>
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Sky Coverage</div>
+            <div class="text-base font-bold text-emerald-400">100% All-Sky</div>
+            <div class="text-[10px] text-[#8E8E93]">4 Maps / 25 Mo</div>
+          </div>
+          <div class="p-4 rounded-lg bg-[#121214] hairline space-y-1">
+            <div class="text-[10px] text-[#8E8E93] uppercase">Orbit Altitude</div>
+            <div class="text-base font-bold text-[#F4F4F6]">700 km</div>
+            <div class="text-[10px] text-[#8E8E93]">Sun-synchronous LEO</div>
+          </div>
+        </div>
+
+        <!-- Team Pioneer Matrix Card -->
+        <div class="p-5 rounded-lg bg-[#121214] hairline flex flex-col md:flex-row items-center justify-between gap-4 font-mono text-xs">
+          <div class="flex items-center gap-4">
+            <div class="relative flex items-center justify-center p-0.5 rounded-full border border-[#222226] bg-[#0A0A0B] shrink-0">
+              <img src="logo_emblem.jpg" onerror="this.src='logo.jpg'" alt="Team Pioneer Matrix Logo" class="w-12 h-12 rounded-full object-cover" />
+            </div>
+            <div>
+              <div class="font-orbitron font-bold text-[#F4F4F6] text-sm">Team Pioneer Matrix</div>
+              <div class="text-[#8E8E93] text-[11px]">NASA International Space Apps Challenge 2026</div>
+              <p class="text-[11px] text-[#8E8E93] mt-1 leading-relaxed max-w-xl font-sans">
+                Engineered for the NASA International Space Apps Challenge 2026 to provide browser-native scientific telemetry analysis and proper-motion dipole discovery for the SPHEREx mission.
+              </p>
+            </div>
+          </div>
+          <div class="text-right text-[#8E8E93] text-[11px] shrink-0">
+            <div class="text-[#F4F4F6] font-semibold">NASA Space Apps Challenge 2026</div>
+            <div class="text-[#06B6D4] font-mono">Team: Pioneer Matrix</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 4: BENCHMARK CATALOG                             -->
+    <!-- ======================================================== -->
+    <section id="targets-section" class="py-16 px-6 md:px-12 bg-[#121214] hairline-t flex flex-col justify-center">
+      <div class="max-w-6xl mx-auto w-full space-y-6">
+        <div class="border-b border-[#222226] pb-4">
+          <div class="font-orbitron text-xs font-semibold text-[#06B6D4] tracking-wider uppercase">Reference Catalogs</div>
+          <h2 class="text-2xl font-bold tracking-tight text-[#F4F4F6] mt-1 font-sans">High-Proper-Motion Benchmark Targets</h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+          <div class="p-4 rounded bg-[#0A0A0B] hairline space-y-2">
+            <div class="font-bold text-[#F4F4F6] flex justify-between">
+              <span>Barnard's Star</span>
+              <span class="text-[#F59E0B]">M4V Dwarf</span>
+            </div>
+            <div class="text-[11px] text-[#8E8E93]">RA: 17h 57m 48.5s · Dec: +04° 41′ 36″</div>
+            <div class="text-[11px] text-[#06B6D4]">Total PM: 10.36″/yr · PA: 355.8°</div>
+          </div>
+
+          <div class="p-4 rounded bg-[#0A0A0B] hairline space-y-2">
+            <div class="font-bold text-[#F4F4F6] flex justify-between">
+              <span>WISE 0855-0714</span>
+              <span class="text-[#C084FC]">Y-Dwarf</span>
+            </div>
+            <div class="text-[11px] text-[#8E8E93]">RA: 08h 55m 10.8s · Dec: -07° 14′ 42″</div>
+            <div class="text-[11px] text-[#06B6D4]">Total PM: 8.15″/yr · PA: 135.2°</div>
+          </div>
+
+          <div class="p-4 rounded bg-[#0A0A0B] hairline space-y-2">
+            <div class="font-bold text-[#F4F4F6] flex justify-between">
+              <span>Epsilon Indi B</span>
+              <span class="text-emerald-400">T1+T6 Binary</span>
+            </div>
+            <div class="text-[11px] text-[#8E8E93]">RA: 22h 03m 21.7s · Dec: -56° 47′ 10″</div>
+            <div class="text-[11px] text-[#06B6D4]">Total PM: 4.70″/yr · PA: 125.0°</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 3. FLOATING ACTION CONTROLS (BOTTOM-RIGHT)               -->
+  <!-- ======================================================== -->
+  <div class="floating-actions-group">
+    <!-- SPHEREx Analyzer Button -->
+    <button id="aiBotFab" class="floating-fab" title="Open SPHEREx Analyzer Telemetry Reasoning">
+      <i data-lucide="bot" class="w-4 h-4 text-[#06B6D4]"></i>
+      <span>SPHEREx Analyzer</span>
+    </button>
+
+    <!-- Viewing Mode Button -->
+    <button id="viewModeFab" class="floating-fab" title="Configure Sky Canvas Observation Engine">
+      <i data-lucide="eye" class="w-4 h-4 text-[#F59E0B]"></i>
+      <span>Viewing Mode</span>
+    </button>
+  </div>
+
+  <!-- Viewing Mode Modal Drawer -->
+  <div id="viewMenuModal">
+    <div class="flex items-center justify-between border-b border-[#222226] pb-2 font-mono text-xs">
+      <span class="font-bold text-[#F4F4F6]">Observation Modes</span>
+      <button id="closeViewMenuBtn" class="text-[#8E8E93] hover:text-[#F4F4F6]">✕</button>
+    </div>
+    <div class="flex flex-col gap-1.5 font-mono text-xs">
+      <button class="mode-select-btn p-2 rounded text-left hairline bg-[#0A0A0B] hover:border-[#06B6D4] active" data-mode="blink">
+        <div class="font-bold text-[#06B6D4]">Blink Comparator</div>
+        <div class="text-[10px] text-[#8E8E93]">Discrete 6-frame epoch playback with proper-motion corridor</div>
+      </button>
+      <button class="mode-select-btn p-2 rounded text-left hairline bg-[#0A0A0B] hover:border-[#06B6D4]" data-mode="single">
+        <div class="font-bold text-[#F4F4F6]">Single / Dual Epoch</div>
+        <div class="text-[10px] text-[#8E8E93]">Side-by-side comparative inspection</div>
+      </button>
+      <button class="mode-select-btn p-2 rounded text-left hairline bg-[#0A0A0B] hover:border-[#06B6D4]" data-mode="diff">
+        <div class="font-bold text-[#F59E0B]">Difference Dipole</div>
+        <div class="text-[10px] text-[#8E8E93]">Pixel-wise subtraction residual</div>
+      </button>
+    </div>
+
+    <!-- FPS Slider for Blink -->
+    <div class="pt-2 border-t border-[#222226] space-y-1 font-mono text-[11px]">
+      <div class="flex justify-between text-[#8E8E93]">
+        <span>Blink Rate:</span>
+        <span id="fpsDisplay" class="text-[#06B6D4] font-bold">4.0 FPS</span>
+      </div>
+      <input id="fpsSlider" type="range" min="1" max="8" step="0.5" value="4" class="w-full" />
+    </div>
+  </div>
+
+  <!-- SPHEREx Analyzer Chat Panel Drawer -->
+  <div id="aiChatDrawer">
+    <div class="h-12 hairline-b bg-[#121214] flex items-center justify-between px-4">
+      <div class="flex items-center gap-2">
+        <i data-lucide="bot" class="w-4 h-4 text-[#06B6D4]"></i>
+        <span class="font-orbitron font-bold text-xs text-[#F4F4F6]">SPHEREx Analyzer</span>
+        <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-mono text-[9px]">ONLINE</span>
+      </div>
+      <button id="closeAiDrawerBtn" class="text-[#8E8E93] hover:text-[#F4F4F6] text-sm">✕</button>
+    </div>
+
+    <!-- Chat Messages -->
+    <div id="aiMessagesContainer" class="flex-1 p-4 overflow-y-auto space-y-3 font-mono text-xs">
+      <div class="p-3 rounded bg-[#0A0A0B] hairline text-xs text-[#F4F4F6] space-y-1.5">
+        <div class="text-[10px] text-[#06B6D4] font-bold uppercase tracking-wider">Astrometric Reasoning Engine Ready</div>
+        <p class="text-[#8E8E93] leading-relaxed font-sans text-xs">
+          Connected to SPHEREx Level-3 Data Pipeline and IRSA TAP service. Select an active benchmark target or enter RA/Dec or Earth location to analyze proper motion, 102-band ice absorption, or dipole residual.
+        </p>
+      </div>
+    </div>
+
+    <!-- Quick Chips -->
+    <div class="px-4 py-2 hairline-t bg-[#0A0A0B]/60 flex items-center gap-2 overflow-x-auto">
+      <button class="ai-chip-btn px-2 py-1 rounded bg-[#18181B] hairline text-[10px] font-mono text-[#8E8E93] hover:text-[#06B6D4] whitespace-nowrap">
+        Evaluate Proper Motion
+      </button>
+      <button class="ai-chip-btn px-2 py-1 rounded bg-[#18181B] hairline text-[10px] font-mono text-[#8E8E93] hover:text-[#06B6D4] whitespace-nowrap">
+        Analyze 3.05µm Ice Trough
+      </button>
+    </div>
+
+    <!-- Input Footer -->
+    <div class="p-3 hairline-t bg-[#121214] flex items-center gap-2">
+      <input
+        id="aiInputPrompt"
+        type="text"
+        placeholder="Query SPHEREx telemetry..."
+        class="flex-1 bg-[#0A0A0B] hairline rounded px-3 py-1.5 text-xs font-mono text-[#F4F4F6] focus:outline-none focus:border-[#06B6D4]"
+      />
+      <button id="sendAiPromptBtn" class="px-3 py-1.5 rounded bg-[#18181B] hairline text-[#06B6D4] hover:bg-[#0A0A0B] text-xs font-mono font-bold">
+        Send
+      </button>
+    </div>
+  </div>
+
+  <!-- Application Script -->
+  <script src="app.js"></script>
 </body>
 </html>
