@@ -231,180 +231,19 @@ def compute_image_difference(
     }
 
 
-def generate_spherex_spectral_profile(object_type: str) -> Dict[str, Any]:
+def generate_spherex_spectral_profile(object_type: str = "") -> Dict[str, Any]:
+    """Compatibility stub: spectra must come from archive measurements, never templates.
+
+    The argument is accepted for older callers but does not select a modeled spectrum.
+    New code should use `spectral_points` returned by the archive processing pipeline.
     """
-    Synthesize high-fidelity 102-band spectral energy distribution (SED) across 0.75 - 5.0 µm,
-    covering the 6 SPHEREx detector arrays (Arr 1 to Arr 6) with key astrophysical molecular features:
-    - H2O: 1.15, 1.4, 1.9, 2.7, 3.0 µm ice absorption
-    - CH4: 1.66, 2.2, 3.3 µm
-    - CO2: 4.26 µm
-    - CO: 2.3 µm, 4.6 µm
-    """
-    # 102 bands logarithmically spaced from 0.75 to 5.00 µm
-    wavelengths = np.geomspace(0.75, 5.00, 102)
-
-    # Assign each wavelength to its SPHEREx detector array
-    # Array 1: 0.75 - 1.11 µm
-    # Array 2: 1.11 - 1.64 µm
-    # Array 3: 1.64 - 2.42 µm
-    # Array 4: 2.42 - 3.82 µm
-    # Array 5: 3.82 - 4.42 µm
-    # Array 6: 4.42 - 5.00 µm
-    def get_array(w: float) -> str:
-        if w < 1.11: return "Arr 1 (0.75-1.11 µm)"
-        if w < 1.64: return "Arr 2 (1.11-1.64 µm)"
-        if w < 2.42: return "Arr 3 (1.64-2.42 µm)"
-        if w < 3.82: return "Arr 4 (2.42-3.82 µm)"
-        if w < 4.42: return "Arr 5 (3.82-4.42 µm)"
-        return "Arr 6 (4.42-5.00 µm)"
-
-    arrays = [get_array(w) for w in wavelengths]
-
-    norm_type = object_type.lower().replace("-", "_").replace(" ", "_")
-
-    # Planck blackbody function approximation
-    def planck(w_um: np.ndarray, temp_k: float) -> np.ndarray:
-        w_m = w_um * 1e-6
-        h = 6.626e-34
-        c = 3.0e8
-        k = 1.38e-23
-        exp_arg = (h * c) / (w_m * k * temp_k)
-        exp_arg = np.clip(exp_arg, 1e-4, 50.0)
-        return (2.0 * h * c**2) / (w_m**5 * (np.exp(exp_arg) - 1.0))
-
-    features = []
-
-    if "brown_dwarf" in norm_type or "wise" in norm_type or "y_dwarf" in norm_type or "t_dwarf" in norm_type:
-        # Sub-stellar ultra-cool brown dwarf (~250 - 600 K)
-        # Strong CH4, H2O vapor + ice, and a distinct 4.5-4.8 µm flux window
-        base_flux = planck(wavelengths, 450.0)
-        base_flux = base_flux / np.max(base_flux) * 0.4
-
-        # Molecular absorption bands (Gaussian notches)
-        def absorption(w_center: float, width: float, depth: float):
-            return 1.0 - depth * np.exp(-0.5 * ((wavelengths - w_center) / width) ** 2)
-
-        # H2O absorption at 1.15, 1.4, 1.9, 2.7 µm
-        base_flux *= absorption(1.15, 0.05, 0.6)
-        base_flux *= absorption(1.40, 0.08, 0.85)
-        base_flux *= absorption(1.90, 0.10, 0.90)
-        base_flux *= absorption(2.70, 0.12, 0.85)
-        # H2O water ice absorption around 3.05 µm
-        base_flux *= absorption(3.05, 0.20, 0.75)
-        # CH4 methane absorption at 1.66, 2.20, 3.32 µm
-        base_flux *= absorption(1.66, 0.06, 0.70)
-        base_flux *= absorption(2.20, 0.09, 0.80)
-        base_flux *= absorption(3.32, 0.15, 0.92)
-        # CO2 absorption at 4.26 µm
-        base_flux *= absorption(4.26, 0.06, 0.65)
-
-        # 4.5-4.8 µm methane opacity window peak (prominent in Y/T dwarfs like WISE 0855)
-        window_boost = 0.85 * np.exp(-0.5 * ((wavelengths - 4.65) / 0.22) ** 2)
-        base_flux += window_boost
-
-        features = [
-            {"molecule": "H2O vapor", "wavelength_um": 1.40, "note": "Vapor bandhead in cool atmosphere"},
-            {"molecule": "CH4 methane", "wavelength_um": 1.66, "note": "Characteristic 2ν3 band"},
-            {"molecule": "H2O vapor", "wavelength_um": 1.90, "note": "Deep water absorption trough"},
-            {"molecule": "CH4 methane", "wavelength_um": 2.20, "note": "Strong overtone absorption"},
-            {"molecule": "H2O ice clouds", "wavelength_um": 3.05, "note": "Diagnostic water-ice mantle (sub-250K)"},
-            {"molecule": "CH4 methane (ν3)", "wavelength_um": 3.32, "note": "Fundamental methane vibrational band"},
-            {"molecule": "CO2 band", "wavelength_um": 4.26, "note": "Atmospheric carbon dioxide notch"},
-            {"molecule": "4.65 µm Opacity Window", "wavelength_um": 4.65, "note": "Clear-atmosphere infrared emission peak"}
-        ]
-
-    elif "red_dwarf" in norm_type or "barnard" in norm_type or "m_dwarf" in norm_type:
-        # M-dwarf star (~3100 K, e.g., Barnard's Star)
-        base_flux = planck(wavelengths, 3134.0)
-        base_flux = base_flux / np.max(base_flux)
-
-        def absorption(w_center: float, width: float, depth: float):
-            return 1.0 - depth * np.exp(-0.5 * ((wavelengths - w_center) / width) ** 2)
-
-        # TiO / VO / H2O / CO
-        base_flux *= absorption(0.85, 0.04, 0.18)
-        base_flux *= absorption(1.13, 0.05, 0.25)
-        base_flux *= absorption(1.40, 0.07, 0.35)
-        base_flux *= absorption(1.90, 0.08, 0.40)
-        base_flux *= absorption(2.32, 0.05, 0.30)  # CO bandhead
-        base_flux *= absorption(4.60, 0.10, 0.22)  # CO fundamental
-
-        features = [
-            {"molecule": "TiO / VO", "wavelength_um": 0.85, "note": "Optical-NIR oxide absorption"},
-            {"molecule": "H2O vapor", "wavelength_um": 1.40, "note": "Stellar photosphere water vapor"},
-            {"molecule": "H2O vapor", "wavelength_um": 1.90, "note": "Deep IR water band"},
-            {"molecule": "CO First Overtone", "wavelength_um": 2.32, "note": "Carbon monoxide molecular bandhead"},
-            {"molecule": "CO Fundamental", "wavelength_um": 4.60, "note": "Photospheric CO absorption"}
-        ]
-
-    elif "t_tauri" in norm_type or "rw_aurigae" in norm_type:
-        # Young Stellar Object (T Tauri) with circumstellar dust accretion disk
-        # Stellar component (~4000 K) + warm dust disk component (1000 K - 300 K)
-        star = planck(wavelengths, 4000.0)
-        star = star / np.max(star) * 0.7
-        disk = planck(wavelengths, 950.0)
-        disk = disk / np.max(disk) * 0.65
-        base_flux = star + disk
-
-        def absorption(w_center: float, width: float, depth: float):
-            return 1.0 - depth * np.exp(-0.5 * ((wavelengths - w_center) / width) ** 2)
-
-        # Circumstellar ices and CO
-        base_flux *= absorption(2.35, 0.06, 0.25)
-        base_flux *= absorption(3.05, 0.15, 0.35)  # Ice coating on grains
-        base_flux *= absorption(4.26, 0.05, 0.20)  # CO2 ice in protoplanetary disk
-        base_flux *= absorption(4.67, 0.08, 0.28)  # CO ice / gas
-
-        features = [
-            {"molecule": "Circumstellar Dust Excess", "wavelength_um": 1.80, "note": "Accretion disk continuum rise"},
-            {"molecule": "CO overtone", "wavelength_um": 2.35, "note": "Inner accretion disk gas"},
-            {"molecule": "H2O Ice Mantle", "wavelength_um": 3.05, "note": "Protoplanetary disk frost line ice"},
-            {"molecule": "CO2 Ice", "wavelength_um": 4.26, "note": "Cold grain surface volatile ice"},
-            {"molecule": "CO fundamental", "wavelength_um": 4.67, "note": "Disk outflow/envelope gas"}
-        ]
-
-    elif "mira" in norm_type or "r_draconis" in norm_type:
-        # Pulsating AGB red giant (~2400 K)
-        base_flux = planck(wavelengths, 2400.0)
-        base_flux = base_flux / np.max(base_flux)
-
-        def absorption(w_center: float, width: float, depth: float):
-            return 1.0 - depth * np.exp(-0.5 * ((wavelengths - w_center) / width) ** 2)
-
-        base_flux *= absorption(1.40, 0.09, 0.50)
-        base_flux *= absorption(1.90, 0.10, 0.60)
-        base_flux *= absorption(2.30, 0.06, 0.45)
-        base_flux *= absorption(2.70, 0.11, 0.55)
-        base_flux *= absorption(4.26, 0.05, 0.25)
-        base_flux *= absorption(4.65, 0.08, 0.40)
-
-        features = [
-            {"molecule": "H2O vapor envelope", "wavelength_um": 1.40, "note": "Extended giant envelope water vapor"},
-            {"molecule": "H2O vapor", "wavelength_um": 1.90, "note": "Strong molecular opacity in cool atmosphere"},
-            {"molecule": "CO overtone", "wavelength_um": 2.30, "note": "Diagnostic carbon monoxide bandhead"},
-            {"molecule": "CO fundamental", "wavelength_um": 4.65, "note": "Strong circumstellar absorption"}
-        ]
-
-    else:
-        # Generic stellar / solar profile (~5770 K)
-        base_flux = planck(wavelengths, 5770.0)
-        base_flux = base_flux / np.max(base_flux)
-        features = [
-            {"molecule": "NIR Continuum", "wavelength_um": 1.60, "note": "H- opacity minimum peak"},
-            {"molecule": "CO band", "wavelength_um": 4.65, "note": "Photospheric carbon monoxide"}
-        ]
-
-    # Normalize flux to 0..100 scale for plotting
-    max_f = np.max(base_flux)
-    if max_f > 0:
-        base_flux = (base_flux / max_f) * 100.0
-
     return {
-        "object_type": object_type,
-        "bands_count": len(wavelengths),
-        "wavelengths_um": [round(float(w), 4) for w in wavelengths],
-        "flux": [round(float(f), 2) for f in base_flux],
-        "detector_arrays": arrays,
-        "absorption_features": features
+        "object_type": None,
+        "bands_count": 0,
+        "wavelengths_um": [],
+        "flux": [],
+        "detector_arrays": [],
+        "absorption_features": [],
+        "status": "unavailable",
+        "note": "No synthetic spectrum is generated; use measured archive spectral points.",
     }
-

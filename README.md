@@ -11,87 +11,33 @@
 
 ---
 
-## 1. Executive Summary & Mission Overview
+## 1. Overview
 
-The **SPHEREx Mission Visualizer** is an astronomical analysis tool and mission-control platform engineered by **Team Pioneer Matrix** for the 2026 NASA Space Apps Challenge.
+The application resolves a user supplied sky target (name or supported coordinate frame) or Earth location, queries the IRSA SPHEREx archive, processes returned FITS cutouts, and sends a compact JSON payload to a tabbed visualizer. The API returns the resolved ICRS coordinates, observation epochs, measured spectral points when they can be extracted, and provenance metadata.
 
-NASA's **SPHEREx** mission surveys the entire celestial sphere every six months across **102 near-infrared spectral channels** ($0.75 - 5.0\,\mu\text{m}$) using six Linear Variable Filter (LVF) detector arrays. This bi-annual cadence and wide spectral grasp provides an unprecedented opportunity to discover:
-1. **Hypothetical Outer Solar System Bodies (Planet X / Trans-Neptunian Objects):** High-albedo infrared emitters exhibiting significant transverse parallax and proper motion between 6-month epochs.
-2. **Sub-Stellar Brown Dwarfs (Y- and T-types):** Ultra-cool objects ($T_{\text{eff}} < 500\,\text{K}$) with atmospheres laden with methane ($CH_4$), water vapor ($H_2O$), and water-ice clouds, completely invisible to optical surveys (e.g. Gaia DR3 $G > 21.0$).
-3. **High Proper-Motion Stellar Neighbors:** Nearby low-mass stars (M-dwarfs) shifting several arcseconds per year.
-4. **Infrared Flux Variables & Occultations:** Young stellar objects (T Tauri) and pulsating asymptotic giant branch stars (Miras).
+Archive retrieval is the source of scientific measurements. If IRSA cannot return usable products, the backend can supply clearly labeled simulated image epochs so the interface remains explorable; these are not archive observations and are not sent to the assistant as measurements. No target-specific spectrum or object-to-color behavior is used. Cache entries are keyed by resolved coordinates and query parameters.
 
-Our platform combines a **live Caltech/IPAC IRSA TAP scraper**, a **sub-pixel image differencing engine**, a **multi-epoch blink comparator (1–8 fps)**, a **102-band spectral energy distribution (SED) diagnostic tool**, and **SPHEREx Analyzer**, an adaptive astronomy assistant powered by Google Gemini when configured.
+The spectral panel plots only wavelength/flux measurements extracted from FITS/WCS data. Empty spectral results are shown as unavailable. The assistant receives scalar metadata and a small set of spectral points, never image pixel arrays; its local fallback reports missing measurements instead of inventing them.
 
----
+The API keeps the latest successful live archive payload when a refresh fails and marks it as stale. Cache keys are stable across application schema upgrades and include resolved coordinates and retrieval parameters. Local runs use `config/cutouts/live_cache`; on a host with an ephemeral filesystem, mount a persistent volume and set `SPHEREX_CACHE_DIR` to that mounted path. Without a persistent volume, data cannot survive the host replacing its instance, regardless of the application cache logic.
 
-## 2. Benchmark Targets
+## 2. General workflow
 
-Our system comes pre-configured with 5 official benchmark targets covering the full spectrum of high-proper-motion, sub-stellar, and variable infrared phenomena:
+1. The UI submits a sky name/coordinate or an Earth place/latitude-longitude pair, plus archive bandpass, field size, and epoch count.
+2. The backend resolves sky coordinates to ICRS, or computes the current zenith coordinates for the Earth location. The response echoes the resolved position.
+3. The backend queries IRSA dynamically, groups nearby observations into separated epochs, downloads FITS products with bounded retries, and caches by coordinate and query parameters.
+4. The FITS processor reads the IMAGE plane and available FLAGS, VARIANCE, ZODI, and WCS metadata; estimates and subtracts background, masks flagged pixels, clips at a 3-sigma floor, log-stretches, resamples, and normalizes all epochs to a shared display range.
+5. The tabbed UI renders individual epochs, blinking, side-by-side/wipe comparisons, differences, and any measured spectral points. Simulated fallback frames are labeled and are never represented as archive data. The assistant receives compact metadata and up to 24 measured spectral points, never image arrays.
 
-| Target Name | J2000 Coordinates ($\alpha, \delta$) | Proper Motion ($\mu$) | Spectral Type | Distance | Scientific Benchmark Significance |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Barnard's Star** | `269.452083°, +04.693389°` | $10.36''/\text{yr}$ | M4.0V | 5.96 ly (1.83 pc) | Fastest proper motion star in the sky; calibration standard for cross-epoch 6-month dipole shifts ($5.18''$). |
-| **WISE 0855-0714** | `133.795129°, -07.245147°` | $8.16''/\text{yr}$ | Y2 | 7.53 ly (2.31 pc) | 4th closest stellar/sub-stellar system; sub-freezing ($\sim 250\,\text{K}$) brown dwarf with $H_2O$ ice clouds; invisible to Gaia optical. |
-| **Epsilon Indi B** | `331.043792°, -56.782694°` | $4.70''/\text{yr}$ | T1 + T6 | 11.87 ly (3.64 pc) | Benchmark binary brown dwarf system exhibiting deep methane ($CH_4$) and water absorption. |
-| **RW Aurigae** | `076.956417°, +30.401417°` | $0.021''/\text{yr}$ | T Tauri | 531 ly (163 pc) | Pre-main-sequence binary undergoing multi-magnitude circumstellar dust stream obscuration events. |
-| **R Draconis** | `248.167625°, +66.755000°` | $0.023''/\text{yr}$ | M5e-M9e III | 2100 ly (644 pc) | High-amplitude Mira variable ($\sim 245$-day pulsation) yielding dramatic single-epoch unipolar difference residuals. |
+## 3. API contract
 
----
+`GET /api/sky` accepts `q`, `input_mode`, `bandpass`, `size_deg`, `max_epochs`, and `refresh_archive`. Its JSON response has four top-level fields: `coordinates`, `epochs`, `spectral_points`, and `metadata`. Each epoch contains its display pixel grid and time; metadata contains source, retrieval notes, and FITS provenance. Spectral points are empty when target-position wavelength/flux samples cannot be extracted.
 
-## 3. Extracted Observables & Science Key
+`POST /api/analyze` accepts a question, recent chat turns, and a compact active-target summary. With `GEMINI_API_KEY`, the configured model answers using only the supplied summary; without it, a limited local fallback reports the available values and missing data. Raw image pixels are not sent. Configure `ANALYZER_ACCESS_TOKEN` before exposing analyzer access beyond localhost.
 
-| Observable | Extraction Engine | Physical Interpretation |
-| :--- | :--- | :--- |
-| **Cross-Epoch Dipole** | $D(x, y) = I_{\text{Ep2}}(x, y) - I_{\text{Ep1}}(x, y)$ | Static stars cancel ($|\Delta| \le 15$). Moving objects form an amber peak ($+ \Delta$) adjacent to a cyan trough ($- \Delta$). |
-| **6-Month Angular Shift** | $\Delta \theta = \frac{\sqrt{\mu_\alpha^{*2} + \mu_\delta^2} \times 0.5}{1000}$ | Quantifies transverse angular displacement across successive 6-month SPHEREx scans. |
-| **Optical-to-IR Ratio** | $F_{\text{Gaia}} / F_{\text{SPHEREx}}$ | Values $< 0.01$ indicate uncatalogued ultra-cool brown dwarfs or outer solar system bodies. |
-| **Molecular Markers** | 102-Band SED Decomposition | Identifies $H_2O$ vapor ($1.4\,\mu\text{m}, 1.9\,\mu\text{m}$), $CH_4$ ($1.66\,\mu\text{m}, 2.2\,\mu\text{m}, 3.32\,\mu\text{m}$), $CO_2$ ($4.26\,\mu\text{m}$), and $4.65\,\mu\text{m}$ opacity window. |
+## 4. Important data limits
 
----
-
-## 4. System Architecture
-
-```
-   +-----------------------------------------------------------------------------------------+
-   |                             USER / CITIZEN SCIENTIST / JUDGE                            |
-   +-----------------------------------------------------------------------------------------+
-                                              |
-                     +------------------------+------------------------+
-                     |                                                 |
-         [Astronomical Name / Coord]                                [City / Address]
-                     |                                                 |
-                     v                                                 v
-           CDS Sesame / SIMBAD                               OpenStreetMap Nominatim
-                     |                                                 |
-                     +------------------------+------------------------+
-                                              |
-                                  J2000 (RA, Dec) + Epoch
-                                              |
-                                              v
-         +-------------------------------------------------------------------------+
-         |                    FastAPI Backend & Astrometry Engine                  |
-         |  - Irsa.query_tap ("spherex.artifact" & "spherex.plane")                |
-         |  - Local Calibrated FITS / Astrometric Physics Simulator                |
-         |  - Zodiacal Background Light Subtraction (IMAGE - ZODI)                 |
-         |  - log1p Dynamic Stretch & uint8 Resampling (128 x 128)                 |
-         |  - MD5 Hash Live Caching in config/cutouts/live_cache/                  |
-         +-------------------------------------------------------------------------+
-                                              |
-                            JSON Payload (Epochs & 102-band SED)
-                                              |
-                                              v
-         +-------------------------------------------------------------------------+
-         |                   Single-Page Mission-Control UI (HTML5)                |
-         |  - Canvas 1: Single Epoch | Blink (1-8 fps) | Difference (Ep2 - Ep1)    |
-         |  - Canvas 2: 102-Band SED across Arrays 1-6 with Molecular Notches      |
-         |  - Interactive Target Reticle & Proper Motion Vector Arrow              |
-         |  - Object Identification HUD (Gaia DR3 vs. UNCATALOGED Candidate)      |
-         |  - SPHEREx Analyzer Integration (POST /api/analyze)                    |
-         +-------------------------------------------------------------------------+
-```
-
----
+Archive availability, coordinate resolution, FITS WCS layouts, and network access determine which products can be returned. Simulated image epochs preserve the UI workflow during archive failures, but they do not validate archive detection, photometry, motion, or spectral features. The spectral view intentionally shows no curve when no measured points are available.
 
 ## 5. Quickstart & Verification
 
@@ -112,24 +58,25 @@ python -m venv .venv
 source .venv/bin/activate
 
 # 3. Install required astronomical and backend packages
-pip install numpy astropy astroquery fastapi uvicorn requests
+pip install -r requirements.txt
 ```
 
-Optional Gemini setup: copy `.env.example` to `.env`, add your `GEMINI_API_KEY`, and set `AI_NAME` to customize the assistant label. The key stays on the backend; the frontend sends only target summary fields and recent chat turns to `/api/analyze`. The `.env` file is Git-ignored; never commit or publish it.
+Optional Gemini setup: copy `.env.example` to `.env`, add your `GEMINI_API_KEY`, and set `AI_NAME` to customize the assistant label. The key stays on the backend; the frontend sends only target summary fields, recent chat turns, and a compact sample of measured spectral points to `/api/analyze`. Image pixels stay in the browser. The `.env` file is Git-ignored; never commit or publish it.
 
-The backend listens on localhost by default. Keep it local for personal use. If you intentionally expose it remotely, configure a random `ANALYZER_ACCESS_TOKEN` (at least 32 characters) and an exact `CORS_ORIGINS` allowlist in the backend `.env`; generate a token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and enter it in the chat panel. Serve the app and API over HTTPS so the access token is encrypted in transit. The token is held only in the current browser tab. Analyzer and legacy explain requests are limited to 10/minute and 100/day per client IP. These in-process limits are a safety net, not a substitute for provider/gateway quotas in a multi-worker public deployment.
+The backend listens on localhost by default. Keep it local for personal use. If you intentionally expose it remotely, configure a random `ANALYZER_ACCESS_TOKEN` (at least 32 characters) and an exact `CORS_ORIGINS` allowlist in the backend `.env`; generate a token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and enter it in the chat panel. Serve the app and API over HTTPS so the access token is encrypted in transit. The token is held only in the current browser tab. If Gemini is rate limited, the assistant falls back to a metadata-only answer. For multi-worker public deployments, configure provider-side limits as well as the in-process safeguard.
 
 ### Running Unit Tests
 ```bash
 python scripts/test_pipeline.py
+python scripts/test_backend.py
 ```
-*Executes all 4 unit test modules: coordinate parsing/roundtrips, 6-month proper motion shifts, difference matrix dipole behavior, and 102-band SED array validation.*
+`test_pipeline.py` checks coordinate parsing, proper-motion math, image-difference behavior, and that missing spectra are not replaced by synthetic templates. `test_backend.py` checks arbitrary coordinate resolution, Earth geocoder errors, alternate FITS recovery, multi-epoch processing, archive provenance, cache expiry, and preservation of the last valid archive result during a failed refresh. Archive interactions in backend tests are mocked.
 
-### Pre-Caching Benchmark Cutouts
+### Fetching a target from the command line
 ```bash
-python scripts/fetch_all_targets.py
+python scripts/fetch_all_targets.py "42.125, -17.75"
 ```
-*Queries IRSA TAP / calibrated simulator and pre-caches `barnards_star.json`, `wise_0855.json`, `eps_indi_b.json`, `rw_aurigae.json`, and `r_draconis.json` into `config/cutouts/`.*
+*Resolves the supplied target and prints the returned archive products or explicitly labeled fallback payload. The app's collapsible benchmark list is served from `/api/benchmarks`.*
 
 ### Starting the Servers
 Open two terminal windows:

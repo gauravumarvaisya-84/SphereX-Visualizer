@@ -136,39 +136,15 @@ def test_image_difference_dipole_behavior():
     print(f"  [PASS] Difference image cancelled static stars. Dipole detected: pos=({pos_x:.1f}, {pos_y:.1f}), neg=({neg_x:.1f}, {neg_y:.1f})")
 
 
-def test_spherex_spectral_profiles():
-    print("[TEST 4/4] Testing 102-Band SPHEREx Spectral Synthesis...")
-
-    types_to_test = ["brown_dwarf", "red_dwarf", "t_tauri_variable", "mira_variable"]
-
-    for obj_type in types_to_test:
-        profile = generate_spherex_spectral_profile(obj_type)
-
-        assert profile["bands_count"] == 102, f"Expected 102 bands, got {profile['bands_count']}"
-        assert len(profile["wavelengths_um"]) == 102
-        assert len(profile["flux"]) == 102
-        assert len(profile["detector_arrays"]) == 102
-
-        # Check wavelength range covers SPHEREx 0.75 - 5.0 µm
-        assert abs(profile["wavelengths_um"][0] - 0.75) < 0.05
-        assert abs(profile["wavelengths_um"][-1] - 5.00) < 0.05
-
-        # Check all flux values are normalized between 0 and 100
-        fluxes = profile["flux"]
-        assert min(fluxes) >= 0.0
-        assert max(fluxes) <= 100.0
-
-        # Check molecular features
-        features = profile["absorption_features"]
-        assert len(features) >= 4, f"Object {obj_type} missing sufficient molecular features"
-
-        # Verify brown dwarf specific features: H2O and CH4
-        if obj_type == "brown_dwarf":
-            mol_names = [f["molecule"] for f in features]
-            assert any("CH4" in m for m in mol_names), "Brown dwarf missing CH4 methane signature"
-            assert any("H2O" in m for m in mol_names), "Brown dwarf missing H2O signature"
-
-        print(f"  [PASS] {obj_type}: 102 spectral bands synthesized (0.75 to 5.00 µm) with {len(features)} molecular diagnostic markers.")
+def test_synthetic_spectrum_is_not_presented_as_measurement():
+    print("[TEST 4/4] Ensuring unmeasured spectra are not synthesized...")
+    profile = generate_spherex_spectral_profile()
+    assert profile["status"] == "unavailable"
+    assert profile["bands_count"] == 0
+    assert profile["wavelengths_um"] == []
+    assert profile["flux"] == []
+    assert profile["absorption_features"] == []
+    print("  [PASS] No object-specific template spectrum or fabricated feature markers are returned.")
 
 
 def run_all_tests():
@@ -180,10 +156,10 @@ def run_all_tests():
     test_coordinate_parsing_and_roundtrips()
     test_six_month_proper_motion_shifts()
     test_image_difference_dipole_behavior()
-    test_spherex_spectral_profiles()
+    test_synthetic_spectrum_is_not_presented_as_measurement()
 
     print("=" * 60)
-    print("ALL 4 TEST MODULES PASSED SUCCESSFULLY! (100% Verified)")
+    print("ALL 4 TEST MODULES PASSED SUCCESSFULLY!")
     print("=" * 60)
 
 

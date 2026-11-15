@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import hashlib
+import tempfile
 import ipaddress
 import re
 import requests
@@ -26,26 +27,21 @@ from astropy.time import Time
 # Ensure scripts directory in path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from astro_tools import (
-    parse_ra_to_deg,
-    parse_dec_to_deg,
-    deg_to_sexagesimal,
-    project_proper_motion,
-    compute_image_difference,
-    generate_spherex_spectral_profile
-)
 from fetch_all_targets import (
     resolve_any_input,
     scrape_spherex_target,
-    load_benchmark_targets
+    parse_coordinate_input,
 )
 
 # Base directories
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 CUTOUTS_DIR = os.path.join(CONFIG_DIR, "cutouts")
-LIVE_CACHE_DIR = os.path.join(CUTOUTS_DIR, "live_cache")
-os.makedirs(LIVE_CACHE_DIR, exist_ok=True)
+DEFAULT_LIVE_CACHE_DIR = os.path.join(CUTOUTS_DIR, "live_cache")
+CACHE_SCHEMA_VERSION = 5
+STALE_CACHE_SCHEMA_VERSIONS = {4, CACHE_SCHEMA_VERSION}
+LIVE_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+SIMULATED_CACHE_TTL_SECONDS = 5 * 60
 
 # Load environment variables from .env if present
 ENV_PATH = os.path.join(BASE_DIR, ".env")
@@ -56,6 +52,15 @@ if os.path.exists(ENV_PATH):
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 os.environ[k.strip()] = v.strip().strip('"').strip("'")
+
+# Use a mounted persistent directory in deployments whose application disk is
+# ephemeral. Relative paths resolve from the project root.
+_cache_dir_setting = os.getenv("SPHEREX_CACHE_DIR", DEFAULT_LIVE_CACHE_DIR)
+LIVE_CACHE_DIR = (
+    _cache_dir_setting if os.path.isabs(_cache_dir_setting)
+    else os.path.join(BASE_DIR, _cache_dir_setting)
+)
+os.makedirs(LIVE_CACHE_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 AI_NAME = os.getenv("AI_NAME", "SPHEREx Analyzer")
@@ -73,8 +78,8 @@ if "*" in ALLOWED_ORIGINS:
 if ANALYZER_ACCESS_TOKEN and len(ANALYZER_ACCESS_TOKEN) < 32:
     raise ValueError("ANALYZER_ACCESS_TOKEN must be at least 32 characters long.")
 
-ANALYZER_REQUESTS_PER_MINUTE = 10
-ANALYZER_REQUESTS_PER_DAY = 100
+ANALYZER_REQUESTS_PER_MINUTE = 20
+ANALYZER_REQUESTS_PER_DAY = 300
 _analyzer_request_times: Dict[str, Deque[float]] = {}
 _analyzer_request_lock = threading.Lock()
 
@@ -101,99 +106,311 @@ def root():
         "team": "Pioneer Matrix - NASA Space Apps Challenge 2026",
         "status": "operational",
         "endpoints": [
-            "/api/sky?q=<query>&size_deg=0.05&bandpass=SPHEREx-D2",
-            "/api/targets",
-            "/api/spectrum?object_type=<type>",
+            "/api/sky?q=<query>&input_mode=sky|earth&size_deg=<degrees>&bandpass=<band>",
             "/api/analyze"
         ]
     }
 
 
-@app.get("/api/targets")
-def get_benchmark_targets():
-    """Returns the 5 official benchmark targets from config/targets.json."""
-    targets = load_benchmark_targets()
-    return {"benchmark_targets": targets}
+@app.get("/api/benchmarks")
+def get_benchmark_examples():
+    """Serve the optional, collapsible curated examples from the project catalog."""
+    catalog_path = os.path.join(CONFIG_DIR, "targets.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as source:
+            catalog = json.load(source)
+        examples = []
+        for item in catalog.get("benchmark_targets", []):
+            try:
+                examples.append({
+                    "name": str(item["name"]),
+                    "ra_deg": float(item["ra_deg"]),
+                    "dec_deg": float(item["dec_deg"]),
+                    "description": str(item.get("description") or "Curated archive example."),
+                    "spectral_type": item.get("spectral_type"),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        return {"examples": examples}
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=503, detail=f"Benchmark examples are unavailable: {type(error).__name__}.")
 
 
 @app.get("/api/sky")
 def get_sky_cutout(
     q: str = Query(..., description="Target name, RA/Dec coordinates, or Earth city/address"),
     size_deg: float = Query(0.05, ge=0.01, le=0.5, description="Field of view size in degrees"),
-    bandpass: str = Query("SPHEREx-D2", description="SPHEREx bandpass (SPHEREx-D1 to D6)"),
+    bandpass: str = Query("ALL", description="One SPHEREx detector array or ALL for a multi-array spectral sample"),
     max_epochs: int = Query(3, ge=1, le=6, description="Number of survey epochs"),
-    input_mode: Literal["sky", "earth"] = Query("sky", description="Interpret coordinates as sky or Earth coordinates")
+    input_mode: Literal["sky", "earth"] = Query("sky", description="Interpret coordinates as sky or Earth coordinates"),
+    refresh_archive: bool = Query(False, description="Bypass response cache and retry IRSA")
 ):
     """
     Search and retrieve multi-epoch SPHEREx calibrated cutouts for any input query.
-    Results are cached by MD5 key in config/cutouts/live_cache/ for instant recall.
+    Results use versioned, validated cache entries. Live products stay cached for a week;
+    simulated fallbacks expire quickly so they cannot hide a later archive result.
     """
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Search query 'q' cannot be empty.")
+    if bandpass not in {"ALL", *(f"SPHEREx-D{i}" for i in range(1, 7))}:
+        raise HTTPException(status_code=422, detail="bandpass must be ALL or a supported SPHEREx-D1 through SPHEREx-D6 array.")
 
     query_str = q.strip()
-
-    # 1. Check if query matches a pre-cached benchmark target file
-    clean_q = re.sub(r"[^a-z0-9]", "", query_str.lower())
-    benchmark_file = None
-    for target in load_benchmark_targets():
-        target_names = (target.get("id", ""), target.get("name", ""))
-        if any(clean_q == re.sub(r"[^a-z0-9]", "", value.lower()) for value in target_names):
-            candidate = os.path.join(CUTOUTS_DIR, f"{target['id']}.json")
-            if os.path.isfile(candidate):
-                benchmark_file = candidate
-                break
-    if benchmark_file and os.path.exists(benchmark_file):
-        try:
-            with open(benchmark_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                data["cache_status"] = "preset_hit"
-                return data
-        except Exception:
-            pass
-
-    # 2. Check MD5 cache in live_cache
-    cache_key = hashlib.md5(f"{input_mode}_{query_str}_{size_deg:.4f}_{bandpass}_{max_epochs}".encode()).hexdigest()
-    cache_file = os.path.join(LIVE_CACHE_DIR, f"{cache_key}.json")
-
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached_data = json.load(f)
-                cached_data["cache_status"] = "cache_hit"
-                return cached_data
-        except Exception:
-            pass
-
-    # 3. Resolve target coordinates from input
+    # Resolve names/frames/geographic input before using a coordinate-keyed cache.
     try:
-        resolved = resolve_earth_lat_lon(query_str) if input_mode == "earth" else resolve_any_input(query_str)
-        if input_mode == "earth" and resolved is None:
-            resolved = resolve_any_input(query_str)
+        if input_mode == "earth":
+            resolved = resolve_earth_lat_lon(query_str)
+            if resolved is None:
+                resolved = resolve_any_input(
+                    query_str,
+                    allow_coordinates=False,
+                    allow_astronomical=False,
+                    allow_geographic=True,
+                )
+        else:
+            resolved = resolve_any_input(query_str, allow_geographic=False)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Target resolution error: {str(e)}")
 
-    # 4. Scrape or synthesize multi-epoch cutouts
-    try:
-        cutout_data = scrape_spherex_target(
-            coord=resolved,
-            size_deg=size_deg,
-            bandpass=bandpass,
-            max_epochs=max_epochs,
-            grid_size=128
-        )
-        cutout_data["cache_status"] = (
-            "live_processed" if cutout_data.get("source") == "irsa_live_tap" else "simulated_fallback"
-        )
+    cache_payload = json.dumps(
+        [
+            input_mode,
+            round(float(resolved["ra_deg"]), 8), round(float(resolved["dec_deg"]), 8),
+            round(size_deg, 4), bandpass, max_epochs,
+        ],
+        separators=(",", ":"),
+    )
+    cache_key = hashlib.sha256(cache_payload.encode("utf-8")).hexdigest()
+    cache_file = os.path.join(LIVE_CACHE_DIR, f"{cache_key}.json")
 
-        # Save to live_cache
+    def apply_current_resolution(payload):
+        coordinates = payload.setdefault("coordinates", {})
+        coordinates.update({
+            "frame": "icrs",
+            "ra_deg": float(resolved["ra_deg"]),
+            "dec_deg": float(resolved["dec_deg"]),
+            "input_frame": resolved.get("input_frame", "icrs"),
+            "input_mode": input_mode,
+            "earth_lat": resolved.get("earth_lat"),
+            "earth_lon": resolved.get("earth_lon"),
+            "observation_time_utc": resolved.get("observation_time_utc"),
+        })
+        metadata = payload.setdefault("metadata", {})
+        metadata.update({
+            "name": resolved.get("name") or metadata.get("name"),
+            "target_id": resolved.get("target_id") or metadata.get("target_id"),
+            "classification": resolved.get("object_type"),
+            "spectral_type": resolved.get("spectral_type"),
+            "proper_motion": resolved.get("total_pm_arcsec_yr"),
+            "proper_motion_known": bool(resolved.get("proper_motion_known", False)),
+            "pm_ra_mas_yr": resolved.get("pm_ra_mas_yr"),
+            "pm_dec_mas_yr": resolved.get("pm_dec_mas_yr"),
+        })
+        return payload
+
+    def has_usable_image_payload(payload):
+        """Reject incomplete cache records before they reach the canvas renderer."""
+        epochs = payload.get("epochs")
+        if not isinstance(epochs, list) or not epochs:
+            return False
+        for epoch in epochs:
+            pixels = epoch.get("pixels_u8") if isinstance(epoch, dict) else None
+            if not isinstance(pixels, list) or not pixels or not isinstance(pixels[0], list):
+                return False
+            width = len(pixels[0])
+            if width == 0 or len(pixels) > 2048 or width > 2048:
+                return False
+            if any(not isinstance(row, list) or len(row) != width for row in pixels):
+                return False
+            if any(
+                not isinstance(value, (int, float)) or not 0 <= value <= 255
+                for row in pixels for value in row
+            ):
+                return False
+        return isinstance(payload.get("spectral_points", []), list)
+
+    stale_live_cache = None
+    stale_live_age_seconds = None
+    if os.path.exists(cache_file):
         try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(cutout_data, f)
+            with open(cache_file, "r", encoding="utf-8") as f:
+                previous = json.load(f)
+            previous_meta = previous.get("_cache", {})
+            previous_source = previous.get("metadata", {}).get("data_source")
+            previous_age = max(0, time.time() - float(previous_meta.get("created_at", 0)))
+            if (
+                previous_meta.get("schema_version") in STALE_CACHE_SCHEMA_VERSIONS
+                and previous_source == "irsa_live_tap"
+                and previous.get("coordinates")
+                and has_usable_image_payload(previous)
+                and abs(float(
+                    previous["coordinates"].get("ra_deg")
+                    if isinstance(previous["coordinates"], dict)
+                    else previous["coordinates"][0]
+                ) - float(resolved["ra_deg"])) < 1e-7
+                and abs(float(
+                    previous["coordinates"].get("dec_deg")
+                    if isinstance(previous["coordinates"], dict)
+                    else previous["coordinates"][1]
+                ) - float(resolved["dec_deg"])) < 1e-7
+            ):
+                stale_live_cache = dict(previous)
+                stale_live_cache.pop("_cache", None)
+                stale_live_age_seconds = previous_age
+        except Exception:
+            stale_live_cache = None
+
+    # Version 4 included the cache schema in its key. Probe that exact legacy
+    # key once so good live results written by the previous build can migrate.
+    if stale_live_cache is None:
+        legacy_payload = json.dumps(
+            [4, input_mode, round(float(resolved["ra_deg"]), 8), round(float(resolved["dec_deg"]), 8),
+             round(size_deg, 4), bandpass, max_epochs],
+            separators=(",", ":"),
+        )
+        legacy_file = os.path.join(LIVE_CACHE_DIR, f"{hashlib.sha256(legacy_payload.encode('utf-8')).hexdigest()}.json")
+        try:
+            with open(legacy_file, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+            legacy_cache = legacy.get("_cache", {})
+            legacy_coords = legacy.get("coordinates")
+            if (legacy_cache.get("schema_version") == 4
+                    and legacy.get("metadata", {}).get("data_source") == "irsa_live_tap"
+                    and legacy.get("epochs") and legacy_coords
+                    and all(isinstance(epoch.get("pixels_u8"), list) and epoch["pixels_u8"] for epoch in legacy["epochs"])):
+                stale_live_cache = {key: value for key, value in legacy.items() if key != "_cache"}
+                stale_live_age_seconds = max(0, time.time() - float(legacy_cache.get("created_at", 0)))
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+
+    if not refresh_archive and os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            cache_meta = cached.pop("_cache", {})
+            metadata = cached.get("metadata", {})
+            data_source = metadata.get("data_source")
+            ttl = LIVE_CACHE_TTL_SECONDS if data_source == "irsa_live_tap" else SIMULATED_CACHE_TTL_SECONDS
+            valid = (
+                cache_meta.get("schema_version") == CACHE_SCHEMA_VERSION
+                and data_source in {"irsa_live_tap", "simulated"}
+                and has_usable_image_payload(cached)
+                and time.time() - float(cache_meta.get("created_at", 0)) < ttl
+            )
+            if valid:
+                metadata["cache_status"] = "cache_hit"
+                metadata["cache_age_seconds"] = round(max(0, time.time() - float(cache_meta.get("created_at", time.time()))))
+                print(f"[cache] hit {cache_key[:12]} ({metadata['data_source']}, {metadata['cache_age_seconds']}s old)")
+                return apply_current_resolution(cached)
+        except Exception:
+            pass
+
+    print(f"[cache] miss {cache_key[:12]} (refresh={refresh_archive})")
+
+    try:
+        try:
+            cutout_data = scrape_spherex_target(
+                coord=resolved,
+                size_deg=size_deg,
+                bandpass=bandpass,
+                max_epochs=max_epochs,
+                grid_size=384
+            )
+        except Exception as scrape_error:
+            print(f"[archive] retrieval failed ({type(scrape_error).__name__}): {scrape_error}")
+            if stale_live_cache is not None:
+                stale_metadata = stale_live_cache.setdefault("metadata", {})
+                stale_metadata["cache_status"] = "stale_archive_fallback"
+                stale_metadata["cache_key"] = cache_key[:16]
+                stale_metadata["stale_age_days"] = round((stale_live_age_seconds or 0) / 86400, 1)
+                stale_metadata["retrieval_note"] = (
+                    f"Fresh archive retrieval failed ({type(scrape_error).__name__}); showing the last successful archive result."
+                )
+                return apply_current_resolution(stale_live_cache)
+            raise HTTPException(status_code=502, detail=f"Archive retrieval failed: {type(scrape_error).__name__}.")
+        data_source = cutout_data.get("data_source") or (
+            "irsa_live_tap" if cutout_data.get("source") == "irsa_live_tap" else "simulated"
+        )
+        cache_status = (
+            "live_processed" if data_source == "irsa_live_tap" else "simulated_fallback"
+        )
+        public_data = {
+            "coordinates": {
+                "frame": "icrs",
+                "ra_deg": float(resolved["ra_deg"]),
+                "dec_deg": float(resolved["dec_deg"]),
+                "input_frame": resolved.get("input_frame", "icrs"),
+                "input_mode": input_mode,
+                "earth_lat": resolved.get("earth_lat"),
+                "earth_lon": resolved.get("earth_lon"),
+                "observation_time_utc": resolved.get("observation_time_utc"),
+            },
+            "epochs": cutout_data.get("epochs", []),
+            "spectral_points": cutout_data.get("spectral_points", []),
+            "metadata": {
+                "target_id": cutout_data.get("target_id") or resolved.get("target_id"),
+                "name": cutout_data.get("name") or resolved.get("name"),
+                "description": cutout_data.get("description") or resolved.get("description"),
+                "catalog_fields": resolved.get("catalog_fields", {}),
+                "proper_motion": resolved.get("total_pm_arcsec_yr"),
+                "proper_motion_known": bool(resolved.get("proper_motion_known", False)),
+                "pm_ra_mas_yr": resolved.get("pm_ra_mas_yr"),
+                "pm_dec_mas_yr": resolved.get("pm_dec_mas_yr"),
+                "classification": resolved.get("object_type"),
+                "spectral_type": resolved.get("spectral_type"),
+                "data_source": data_source,
+                "cache_status": cache_status,
+                "cache_key": cache_key[:16],
+                "bandpass": bandpass,
+                "size_deg": size_deg,
+                "pixel_scale_arcsec": cutout_data.get("pixel_scale_arcsec"),
+                "spectrum_status": "measured" if cutout_data.get("spectral_points") else "unavailable",
+                "data_manifest": cutout_data.get("data_manifest", []),
+                "retrieval_note": cutout_data.get("retrieval_note", ""),
+            },
+        }
+
+        # A temporary archive outage should never replace the last usable FITS
+        # result with a simulation. Return that result as stale and keep it on disk.
+        if data_source == "simulated" and stale_live_cache is not None:
+            stale_metadata = stale_live_cache.setdefault("metadata", {})
+            stale_metadata["cache_status"] = "stale_archive_fallback"
+            stale_metadata["cache_key"] = cache_key[:16]
+            stale_metadata["stale_age_days"] = round((stale_live_age_seconds or 0) / 86400, 1)
+            stale_metadata["retrieval_note"] = (
+                (stale_metadata.get("retrieval_note", "") + " ").strip()
+                + "A fresh archive request did not return usable FITS data; showing the last successful archive result."
+            )
+            return apply_current_resolution(stale_live_cache)
+
+        # Save atomically: a partial write must never poison a future lookup.
+        try:
+            if data_source != "simulated" or stale_live_cache is None:
+                cache_record = dict(public_data)
+                cache_record["_cache"] = {
+                    "schema_version": CACHE_SCHEMA_VERSION,
+                    "created_at": time.time(),
+                    "coordinates": [resolved["ra_deg"], resolved["dec_deg"]],
+                    "query_parameters": {
+                        "input_mode": input_mode,
+                        "size_deg": size_deg,
+                        "bandpass": bandpass,
+                        "max_epochs": max_epochs,
+                        "grid_size": 384,
+                    },
+                }
+                with tempfile.NamedTemporaryFile(
+                    "w", encoding="utf-8", dir=LIVE_CACHE_DIR, delete=False, suffix=".tmp"
+                ) as temp_file:
+                    json.dump(cache_record, temp_file, separators=(",", ":"))
+                    temp_path = temp_file.name
+                os.replace(temp_path, cache_file)
         except Exception as write_err:
             print(f"Warning: Could not write cache file: {write_err}")
 
-        return cutout_data
+        return public_data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate SPHEREx data: {str(e)}")
 
@@ -247,9 +464,9 @@ class AnalyzeRequest(BaseModel):
 ANALYZER_SYSTEM_PROMPT = """You are {ai_name}, an adaptive SPHEREx astronomy guide.
 Use only the compact active-target summary and the conversation supplied. Do not invent measurements, catalogs, or detections.
 For casual questions, answer in plain English in 2–3 crisp sentences using the target's real numbers, then provide an intriguing curiosity-hook question.
-For technical questions about proper motion, spectral bands, Gaia/IR ratios, or difference images, answer with precise astrophysical depth and provide a deeper investigative next question.
+For technical questions about coordinates, measured spectral points, quality flags, or epoch comparisons, answer with precise astrophysical depth and provide a useful next question.
 Return only JSON with exactly these string fields: {"reply":"...","suggested_question":"..."}.
-Keep reply below 120 words. Treat 4.26 microns as the CO2 feature region; do not claim a measured peak unless the supplied data says one was measured."""
+Keep reply below 120 words. Say when a measurement is unavailable. Distinguish archive measurements from simulated data. Never infer a chemical identification from a local maximum/minimum alone."""
 
 
 def compact_target_summary(target: Dict[str, Any]) -> Dict[str, Any]:
@@ -261,9 +478,9 @@ def compact_target_summary(target: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         ratio = None
     try:
-        proper_motion = float(target.get("proper_motion") or 0)
+        proper_motion = float(target.get("proper_motion")) if target.get("proper_motion") is not None else None
     except (TypeError, ValueError):
-        proper_motion = 0.0
+        proper_motion = None
     try:
         wavelength = float(target.get("wavelength_um")) if target.get("wavelength_um") is not None else None
     except (TypeError, ValueError):
@@ -272,15 +489,38 @@ def compact_target_summary(target: Dict[str, Any]) -> Dict[str, Any]:
         epoch_count = max(0, min(6, int(target.get("epoch_count") or 0)))
     except (TypeError, ValueError):
         epoch_count = 0
+    spectral_points = []
+    for point in target.get("spectral_points", [])[:24]:
+        if not isinstance(point, dict):
+            continue
+        compact_point = {
+            key: _compact_number(point.get(key))
+            for key in ("wavelength_um", "flux", "uncertainty", "detection_snr", "mjd")
+        }
+        compact_point.update({
+            "flux_unit": str(point.get("flux_unit") or "")[:32],
+            "bandpass": str(point.get("bandpass") or "")[:24],
+            "epoch_index": _compact_number(point.get("epoch_index")),
+        })
+        spectral_points.append(compact_point)
     return {
         "name": name,
         "ra_deg": _compact_number(target.get("ra_deg")),
         "dec_deg": _compact_number(target.get("dec_deg")),
         "proper_motion": proper_motion,
+        "proper_motion_known": bool(target.get("proper_motion_known", proper_motion is not None)),
         "optical_ir_ratio": ratio,
         "wavelength_um": wavelength,
         "epoch_count": epoch_count,
-        "discovery_status": str(target.get("discovery_status") or "unverified")[:40]
+        "discovery_status": str(target.get("discovery_status") or "unverified")[:40],
+        "data_source": str(target.get("data_source") or "unknown")[:40],
+        "spectrum_is_synthetic": bool(target.get("spectrum_is_synthetic", False)),
+        "spectral_points": spectral_points,
+        "classification": str(target.get("classification") or "")[:80] or None,
+        "catalog_fields": {
+            str(key)[:40]: value if isinstance(value, (str, int, float, bool)) or value is None else str(value)[:80]
+            for key, value in (target.get("catalog_fields", {}) if isinstance(target.get("catalog_fields"), dict) else {}).items()
+        },
     }
 
 
@@ -297,33 +537,69 @@ def _local_analysis(prompt: str, target: Dict[str, Any]) -> Dict[str, str]:
     ratio = target["optical_ir_ratio"]
     wavelength = target["wavelength_um"]
     low = prompt.lower()
-    deep = any(term in low for term in ("ratio", "proper motion", "vector", "dipole", "absorption", "band", "um", "µm", "gaia", "epoch"))
+    asked_wavelength = None
+    technical = bool(re.search(
+        r"\b(proper motion|motion|vector|dipole|absorption|band|spectrum|spectral|sed|epoch|difference|wavelength|microns?|quality|flag|coordinate|brightness|flux|ratio|catalog)\b",
+        low,
+    )) or bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:µm|um)\b", low))
 
-    if deep:
-        ratio_match = re.search(r"(?:ratio|optical.to.ir)[^0-9]{0,30}([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?)", low)
-        wave_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:um|µm|microns?)", low)
-        if ratio_match:
-            ratio = float(ratio_match.group(1))
+    if technical:
+        wave_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:um|µm|microns?)\b", low)
         if wave_match:
-            wavelength = float(wave_match.group(1))
-        ratio_text = f"{ratio:g}" if ratio is not None else "not measured in the active summary"
+            asked_wavelength = float(wave_match.group(1))
         wavelength_text = f"{wavelength:g} µm" if wavelength is not None else "not specified"
-        reply = (
-            f"{name} has a proper motion of {motion:g} arcsec/year across {target['epoch_count']} epoch(s). "
-            f"The optical-to-IR ratio is {ratio_text}; a value of 0.001 means optical flux is about one-thousandth "
-            "of the infrared measure, consistent with an IR-dominated source but not proof of a new object. "
-            f"{wavelength_text} is near the 4.26 µm CO2 feature region; a reported peak there needs continuum and calibration checks, "
-            "since CO2 is generally diagnosed by absorption."
+        motion_text = (
+            f"The supplied proper motion is {motion:g} arcsec/year."
+            if target.get("proper_motion_known") and motion is not None
+            else "Proper motion is not available in the active target summary."
         )
-        question = "Can we compare the neighboring bands and epoch-to-epoch flux to distinguish a real feature from calibration or variability?"
+        if any(term in low for term in ("spectrum", "spectral", "sed", "absorption", "band", "wavelength", "micron", "µm")):
+            reference_wavelength = asked_wavelength if asked_wavelength is not None else wavelength
+            reference_text = f"{reference_wavelength:g} µm" if reference_wavelength is not None else "unspecified"
+            wavelength_note = f"The question refers to {reference_text}." if reference_wavelength is not None else "No wavelength is available in the active summary."
+            if wavelength is not None:
+                wavelength_note += f" The latest image band is {wavelength_text}."
+            measured = [p for p in target.get("spectral_points", []) if _compact_number(p.get("wavelength_um")) is not None and _compact_number(p.get("flux")) is not None]
+            spectrum_note = f"The active payload includes {len(measured)} measured wavelength/flux point(s)." if measured else "No measured spectrum is available in the active payload."
+            if asked_wavelength is not None and measured:
+                nearest = min(measured, key=lambda point: abs(float(point["wavelength_um"]) - asked_wavelength))
+                wave = float(nearest["wavelength_um"])
+                flux = float(nearest["flux"])
+                unit = str(nearest.get("flux_unit") or "flux units")
+                uncertainty = _compact_number(nearest.get("uncertainty"))
+                sample_note = f"Nearest returned point: {wave:.5g} µm = {flux:.5g} {unit}"
+                if uncertainty is not None:
+                    sample_note += f" ± {uncertainty:.3g}"
+                sample_note += f" (epoch {nearest.get('epoch_index', 'unknown')})."
+                spectrum_note += " " + sample_note
+            reply = f"{name}: {wavelength_note} {spectrum_note} {motion_text}"
+            question = "Would you like to inspect returned measurements or compare the observation epochs?"
+        elif "ratio" in low or "catalog" in low:
+            ratio_note = (
+                f"The supplied optical-to-infrared ratio is {ratio:g}."
+                if ratio is not None else "An optical-to-infrared flux ratio is not available in the active data."
+            )
+            catalog_fields = target.get("catalog_fields") or {}
+            catalog_note = (
+                " Catalog fields supplied: " + ", ".join(f"{key}={value}" for key, value in list(catalog_fields.items())[:5]) + "."
+                if catalog_fields else " No cross-catalog match fields were supplied."
+            )
+            reply = f"{name}: {ratio_note}{catalog_note} {motion_text}"
+            question = "Would you like to inspect the available measurements or catalog fields?"
+        else:
+            image_note = "The displayed images are simulated, so they are not archive detections." if target.get("data_source") != "irsa_live_tap" else "The displayed images are processed IRSA archive cutouts."
+            reply = f"{name}: {motion_text} The active image contains {target['epoch_count']} epoch(s). {image_note}"
+            question = "Would you like to compare the first two epochs or inspect the data source?"
     else:
-        reply = (
-            f"This is {name}, centered at RA {target['ra_deg'] if target['ra_deg'] is not None else 'unknown'}° "
-            f"and Dec {target['dec_deg'] if target['dec_deg'] is not None else 'unknown'}°. "
-            f"It moves at about {motion:g} arcsec per year; the canvas compares {target['epoch_count']} observation epoch(s) "
-            "to help reveal motion or brightness changes."
+        motion_text = (
+            f"The configured proper motion is {motion:g} arcsec/year."
+            if target.get("proper_motion_known") and motion is not None
+            else "Proper motion is not available for this target."
         )
-        question = "Want to see how its motion leaves a positive-and-negative footprint in the difference view?"
+        ra_text = f"{target['ra_deg']:.5f}°" if target["ra_deg"] is not None else "unknown"
+        dec_text = f"{target['dec_deg']:.5f}°" if target["dec_deg"] is not None else "unknown"
+        reply = f"{name} is centered at RA {ra_text}, Dec {dec_text}. {motion_text} The view compares {target['epoch_count']} epoch(s); check the source label to see whether they are live archive data or simulated."
+        question = "Would you like to inspect the image source or compare the first two epochs?"
     return {"reply": _limit_words(reply, 119), "suggested_question": question}
 
 
@@ -400,12 +676,20 @@ def analyze_target(
     analyzer_token: Optional[str] = Header(default=None, alias="X-Analyzer-Token")
 ):
     _enforce_analyzer_access(request, analyzer_token)
-    _enforce_gemini_rate_limit(request)
-
     target = compact_target_summary(payload.target)
     prompt = payload.prompt.strip()
     history = payload.history[-4:]
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
+
+    try:
+        _enforce_gemini_rate_limit(request)
+    except HTTPException as error:
+        if error.status_code != 429:
+            raise
+        local = _local_analysis(prompt, target)
+        local["source"] = "local_rate_limit_fallback"
+        local["notice"] = "The assistant's online request limit was reached; this answer uses the available target metadata."
+        return local
 
     if api_key:
         contents = []
@@ -447,154 +731,21 @@ def analyze_target(
                 raise ValueError("Gemini response did not meet the analyzer response format.")
             return {
                 "reply": reply,
-                "suggested_question": suggested_question
+                "suggested_question": suggested_question,
+                "source": "gemini"
             }
         except (requests.RequestException, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
             print(f"Gemini analysis unavailable ({type(error).__name__}); using the local analyzer.")
 
     result = _local_analysis(prompt, target)
+    result["source"] = "local_metadata"
     return result
 
 
 @app.get("/api/spectrum")
-def get_spectrum(object_type: str = Query("brown_dwarf", description="Astrophysical object classification")):
-    """Returns 102-band synthesized spectral profile with molecular diagnostic markers."""
-    return generate_spherex_spectral_profile(object_type)
-
-
-@app.get("/api/explain")
-def explain_target(
-    request: Request,
-    target: str = Query(..., description="Target name or identifier"),
-    object_type: Optional[str] = Query("unknown", description="Classification (e.g. brown_dwarf, red_dwarf)"),
-    pm: Optional[float] = Query(0.0, description="Total proper motion in arcsec/yr"),
-    optical_to_ir_ratio: Optional[float] = Query(None, description="Optical-to-IR flux ratio"),
-    is_gaia_match: Optional[bool] = Query(True, description="Whether an optical Gaia counterpart exists"),
-    analyzer_token: Optional[str] = Header(default=None, alias="X-Analyzer-Token")
-):
-    """
-    AI Astrobiology & Astrophysics narrative generator.
-    Uses GEMINI_API_KEY from .env if available, or rich local astrophysics reasoning model.
-    """
-    api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
-    _enforce_analyzer_access(request, analyzer_token)
-    _enforce_gemini_rate_limit(request)
-
-    # 1. Attempt Google Gemini API if API key is present
-    if api_key:
-        try:
-            prompt = (
-                f"You are the senior astrophysicist for Team Pioneer Matrix in the NASA Space Apps Challenge 2026. "
-                f"Analyze this celestial object observed by the SPHEREx satellite mission:\n"
-                f"- Name/ID: {target}\n"
-                f"- Object Classification: {object_type}\n"
-                f"- Proper Motion: {pm:.3f} arcsec/year\n"
-                f"- Gaia Optical Counterpart: {'Yes (Catalog Match)' if is_gaia_match else 'None (UNCATALOGED / Extreme IR Candidate)'}\n"
-                f"- Optical-to-IR flux ratio: {optical_to_ir_ratio if optical_to_ir_ratio is not None else 'High IR excess'}\n\n"
-                f"Provide a concise, 3-paragraph scientific breakdown covering:\n"
-                f"1. Astrometric significance (motion and cross-epoch dipole behavior).\n"
-                f"2. Infrared spectral characteristics across SPHEREx's 102 bands (mention H2O, CH4, or CO features).\n"
-                f"3. Science implication for the search for Planet X, brown dwarfs, or stellar evolution."
-            )
-
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            }
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 600}
-            }
-
-            resp = requests.post(url, headers=headers, json=payload, timeout=8)
-            if resp.status_code == 200:
-                res_data = resp.json()
-                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                return {
-                    "source": "gemini_api",
-                    "model": "gemini-2.5-flash",
-                    "explanation": text.strip()
-                }
-        except Exception as e:
-            print(f"Gemini API request failed ({e}), falling back to local science engine.")
-
-    # 2. High-fidelity Astrophysics Knowledge Engine Fallback
-    target_clean = target.lower()
-    norm_type = (object_type or "unknown").lower()
-
-    if not is_gaia_match or "wise" in target_clean or "brown" in norm_type or pm > 5.0:
-        headline = "Sub-Stellar Brown Dwarf / Planet X Candidate"
-        astrometry_desc = (
-            f"The target demonstrates an extreme proper motion of {pm:.2f}\"/yr without an optical Gaia DR3 counterpart. "
-            "In SPHEREx multi-epoch difference imaging (Epoch 2 - Epoch 1), this source produces a textbook dipolar signature "
-            "composed of an amber positive flux peak adjacent to a cyan negative trough."
-        )
-        spec_desc = (
-            "Spectral energy distribution across SPHEREx's 102 bands (0.75–5.0 µm) reveals massive methane (CH4) absorption troughs "
-            "at 1.66 µm, 2.2 µm, and 3.32 µm, coupled with deep atmospheric water-vapor bands at 1.4 µm and 1.9 µm. "
-            "The distinct emission peak at 4.65 µm confirms low atmospheric opacity in the mid-infrared window, characteristic of "
-            "ultra-cool sub-stellar atmospheres below 500 K."
-        )
-        science_desc = (
-            "Because this source is completely extinguished in optical surveys (G > 21 mag) but luminous in SPHEREx Detector Arrays 4–6, "
-            "it represents a prime candidate for a nearby sub-stellar neighbor or high-albedo outer Solar System body."
-        )
-    elif "barnard" in target_clean or "red_dwarf" in norm_type:
-        headline = "High Proper-Motion M-Dwarf Benchmark (Barnard's Star Class)"
-        astrometry_desc = (
-            f"With a staggering proper motion of {pm:.2f}\"/yr, this high-velocity stellar neighbor exhibits a 5.18\" displacement "
-            "between consecutive 6-month SPHEREx survey epochs, shifting by ~3.7 pixels across the 128x128 grid."
-        )
-        spec_desc = (
-            "Its SED reflects a 3,130 K photospheric blackbody modulated by broad titanium oxide (TiO) and vanadium oxide (VO) "
-            "absorption bands in Arrays 1–2 (0.75–1.6 µm), and prominent carbon monoxide (CO) overtone bandheads near 2.32 µm."
-        )
-        science_desc = (
-            "High-contrast astrometric differencing on this benchmark proves the capability of the SPHEREx all-sky survey to detect "
-            "rapid transverse kinematic motions across the solar neighborhood."
-        )
-    elif "rw_aurigae" in target_clean or "t_tauri" in norm_type:
-        headline = "Circumstellar Dust Obscuration in Young Stellar Object (RW Aurigae)"
-        astrometry_desc = (
-            f"The object maintains stationary astrometry ({pm:.3f}\"/yr) but displays prominent single-epoch unipolar residuals "
-            "in difference imaging, indicative of dramatic multi-magnitude occultation events."
-        )
-        spec_desc = (
-            "The 102-band spectrum exhibits a pronounced warm dust excess spanning SPHEREx Arrays 3–6 (2.0–5.0 µm), accompanied by "
-            "ice-mantle absorption bands at 3.05 µm (H2O ice) and 4.26 µm (CO2 ice) within the protoplanetary disk."
-        )
-        science_desc = (
-            "SPHEREx's bi-annual sky cadences enable continuous photometric monitoring of protoplanetary dust dynamics, shedding light "
-            "on tidal disruptions and planet-forming circumstellar environments."
-        )
-    elif "r_draconis" in target_clean or "mira" in norm_type:
-        headline = "Long-Period Mira Pulsating Variable (R Draconis)"
-        astrometry_desc = (
-            f"Displaying negligible proper motion ({pm:.3f}\"/yr), the source undergoes enormous periodic flux swings (~245-day cycle) "
-            "between high and low pulsation states across successive SPHEREx sky scans."
-        )
-        spec_desc = (
-            "The NIR spectrum is dominated by cool giant molecular envelopes with severe water vapor absorption (1.4 and 1.9 µm), "
-            "first-overtone CO absorption at 2.3 µm, and fundamental CO vibrational features at 4.65 µm."
-        )
-        science_desc = (
-            "Tracking Mira variables across SPHEREx's 102 channels provides critical calibration for cosmic distance scales and stellar "
-            "mass-loss return into the interstellar medium."
-        )
-    else:
-        headline = f"Astronomical Analysis: {target}"
-        astrometry_desc = f"Target exhibits measured proper motion of {pm:.3f}\"/yr at J2000 coordinates."
-        spec_desc = "Continuum flux across SPHEREx 102 bands (0.75–5.0 µm) shows standard stellar photospheric absorption characteristics."
-        science_desc = "Calibrated against Gaia DR3 astrometric frame and CatWISE infrared photometric standards."
-
-    full_narrative = f"### {headline}\n\n**1. Astrometric Kinematics:**\n{astrometry_desc}\n\n**2. Molecular & Spectral Signatures:**\n{spec_desc}\n\n**3. Mission Impact & Planet X Search:**\n{science_desc}"
-
-    return {
-        "source": "pioneer_matrix_astrophysics_engine",
-        "headline": headline,
-        "explanation": full_narrative
-    }
+def get_spectrum():
+    """No target-independent synthetic spectrum is served; use measured /api/sky points."""
+    return {"spectral_points": [], "status": "unavailable", "note": "Load a target through /api/sky to request archive measurements."}
 
 
 if __name__ == "__main__":

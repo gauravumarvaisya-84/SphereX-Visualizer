@@ -15,64 +15,107 @@
       <span class="brand-mark" aria-hidden="true">S</span>
       <span><strong>SPHEREx</strong><small>MISSION VISUALIZER</small></span>
     </a>
-    <div class="mission-status"><span class="status-dot"></span> OBSERVATORY ONLINE</div>
+    <nav class="screen-nav" role="tablist" aria-label="Mission workspace">
+      <button class="screen-tab active" type="button" data-screen-tab="observatory" role="tab" aria-selected="true">Observatory</button>
+      <button class="screen-tab" type="button" data-screen-tab="spectrum" role="tab" aria-selected="false">Spectral lab</button>
+      <button class="screen-tab" type="button" data-screen-tab="assistant" role="tab" aria-selected="false">Assistant</button>
+    </nav>
+    <div class="mission-status"><span class="status-dot"></span> MISSION CONTROL</div>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="workspace" data-screen="observatory">
     <section class="search-panel card" aria-labelledby="search-title">
       <div class="eyebrow">TARGET RESOLUTION</div>
       <h1 id="search-title">Explore the infrared sky</h1>
       <p class="muted">Resolve a sky target or point the observatory at an Earth location.</p>
       <div class="segmented" role="group" aria-label="Coordinate input type">
-        <button class="segment active" type="button" data-input-mode="sky" aria-pressed="true">Sky RA / Dec</button>
+        <button class="segment active" type="button" data-input-mode="sky" aria-pressed="true">Sky target</button>
         <button class="segment" type="button" data-input-mode="earth" aria-pressed="false">Earth location</button>
       </div>
       <form id="search-form">
-        <label for="target-query" id="query-label">Target name or RA, Dec</label>
-        <div class="search-row">
-          <input id="target-query" name="q" autocomplete="off" value="Barnard's Star"
-            placeholder="Barnard's Star, M101, or 269.452083, 4.693389" required>
+        <div id="sky-entry-tabs" class="entry-tabs" role="tablist" aria-label="Sky target input">
+          <button class="entry-tab active" type="button" data-query-mode="name" role="tab" aria-selected="true">Target name</button>
+          <button class="entry-tab" type="button" data-query-mode="coordinates" role="tab" aria-selected="false">Coordinates</button>
+        </div>
+        <div id="name-field" class="input-pane">
+          <label for="target-query">Astronomical name or coordinate string</label>
+          <input id="target-query" name="q" autocomplete="off"
+            placeholder="Object name, catalog identifier, or coordinate pair" required>
+        </div>
+        <div id="coordinate-fields" class="coordinate-fields" hidden>
+          <div class="coordinate-frame"><label for="coordinate-frame">Coordinate frame</label><input id="coordinate-frame" list="coordinate-frames" value="icrs" placeholder="Astropy frame name"><datalist id="coordinate-frames"><option value="icrs"><option value="fk5"><option value="fk4"><option value="galactic"><option value="geocentrictrueecliptic"><option value="barycentrictrueecliptic"></datalist></div>
+          <div><label id="coordinate-one-label" for="ra-query">Coordinate 1</label><input id="ra-query" placeholder="269.452083 or 17:57:48.5" inputmode="text"></div>
+          <div><label id="coordinate-two-label" for="dec-query">Coordinate 2</label><input id="dec-query" placeholder="+4.693389 or +04:41:36" inputmode="text"></div>
+        </div>
+        <div class="request-options">
+          <div><label for="bandpass-select">SPHEREx bandpass</label><select id="bandpass-select"><option value="ALL" selected>All arrays · spectrum</option><option>SPHEREx-D1</option><option>SPHEREx-D2</option><option>SPHEREx-D3</option><option>SPHEREx-D4</option><option>SPHEREx-D5</option><option>SPHEREx-D6</option></select></div>
+          <div><label for="field-size">Field size (degrees)</label><input id="field-size" type="number" min="0.01" max="0.5" step="0.01" value="0.05"></div>
+          <div><label for="epoch-count">Maximum epochs</label><select id="epoch-count"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></div>
+        </div>
+        <div id="earth-field" class="input-pane" hidden>
+          <label for="earth-query">City, district, address, or latitude, longitude</label>
+          <input id="earth-query" autocomplete="off" placeholder="City, district, address, or latitude, longitude">
+        </div>
+        <div class="search-submit-row">
           <button class="button button-primary" type="submit">Observe <span aria-hidden="true">→</span></button>
         </div>
-        <p id="search-help" class="field-help">Decimal or sexagesimal coordinates, star and galaxy names.</p>
+        <p id="search-help" class="field-help">Search the astronomical name resolver or choose coordinate entry.</p>
       </form>
-      <div class="preset-area">
-        <div class="eyebrow">BENCHMARK TARGETS</div>
-        <div id="preset-list" class="preset-list" aria-label="Benchmark targets"></div>
-      </div>
       <div class="search-message" id="search-message" role="status" aria-live="polite"></div>
+      <details class="preset-area benchmark-disclosure" id="benchmark-disclosure">
+        <summary><span><strong>Benchmark targets</strong><small class="preset-summary-count" id="benchmark-count">Optional archive examples</small></span><span class="disclosure-icon" aria-hidden="true">+</span></summary>
+        <div class="benchmark-list" id="benchmark-list"><p class="muted">Loading examples…</p></div>
+      </details>
       <div class="target-summary" id="target-summary" hidden></div>
     </section>
 
-    <section class="visual-panel card" aria-labelledby="visual-title">
+    <section class="visual-panel screen-panel card" data-screen-panel="observatory" aria-labelledby="visual-title">
       <div class="panel-heading">
         <div><div class="eyebrow">MULTI-EPOCH OBSERVATIONS</div><h2 id="visual-title">Sky cutout</h2></div>
         <span class="pill" id="data-source">WAITING FOR TARGET</span>
       </div>
       <div class="view-tabs" role="tablist" aria-label="Sky image mode">
         <button class="view-tab active" type="button" data-view="single" role="tab" aria-selected="true">Single Epoch</button>
+        <button class="view-tab" type="button" data-view="split" role="tab" aria-selected="false">Side-by-side</button>
+        <button class="view-tab" type="button" data-view="wipe" role="tab" aria-selected="false">Swipe</button>
         <button class="view-tab" type="button" data-view="blink" role="tab" aria-selected="false">Blink Comparator</button>
-        <button class="view-tab" type="button" data-view="difference" role="tab" aria-selected="false">Difference E2 − E1</button>
+        <button class="view-tab" type="button" data-view="difference" role="tab" aria-selected="false">Difference</button>
       </div>
       <div class="canvas-wrap">
         <canvas id="sky-canvas" width="128" height="128" aria-label="SPHEREx infrared sky image"></canvas>
+        <div id="comparison-view" class="comparison-view" hidden>
+          <div class="comparison-frame"><span id="comparison-label-a">E1</span><canvas id="comparison-canvas-a" width="128" height="128" aria-label="First epoch infrared image"></canvas></div>
+          <div class="comparison-divider" aria-hidden="true">⇄</div>
+          <div class="comparison-frame"><span id="comparison-label-b">E2</span><canvas id="comparison-canvas-b" width="128" height="128" aria-label="Second epoch infrared image"></canvas></div>
+        </div>
+        <div id="wipe-view" class="wipe-view" hidden>
+          <canvas id="wipe-canvas-a" width="128" height="128" aria-label="Epoch one underneath swipe comparison"></canvas>
+          <canvas id="wipe-canvas-b" width="128" height="128" aria-label="Epoch two revealed by swipe comparison"></canvas>
+          <div id="wipe-divider" class="wipe-divider" aria-hidden="true"></div>
+          <span id="wipe-label-a" class="wipe-label wipe-label-a">E1</span><span id="wipe-label-b" class="wipe-label wipe-label-b">E2</span>
+        </div>
         <div class="canvas-label" id="epoch-label">Awaiting observations</div>
         <div class="canvas-hint">CLICK A PIXEL TO IDENTIFY</div>
       </div>
+      <div class="epoch-row" id="epoch-controls" hidden><label for="epoch-range">Observation epoch <output id="epoch-range-value">E1</output></label><input id="epoch-range" type="range" min="0" max="2" value="0"></div>
+      <div class="epoch-row wipe-controls" id="wipe-controls" hidden><label for="wipe-range">Reveal epoch two <output id="wipe-range-value">50%</output></label><input id="wipe-range" type="range" min="5" max="95" value="50"></div>
       <div class="blink-row" id="blink-controls" hidden>
         <button class="button button-secondary" id="blink-toggle" type="button">Pause</button>
         <label for="blink-speed">Blink speed <output id="blink-speed-value">2 fps</output></label>
         <input id="blink-speed" type="range" min="1" max="8" value="2">
       </div>
+      <div class="epoch-row" id="difference-controls" hidden><label for="difference-epoch">Compare epoch one with</label><select id="difference-epoch"></select></div>
       <div class="observation-meta" id="observation-meta">Load a target to render its epochs.</div>
       <div class="dot-hud" id="dot-hud" aria-live="polite">Dot View: click the image to inspect a sky position.</div>
+      <div class="visual-actions"><div class="visual-action-buttons"><button class="button button-secondary" id="open-data-products" type="button" disabled>Imported files <span aria-hidden="true">↗</span></button><button class="button button-secondary" id="open-data-inspector" type="button" disabled>Observation data <span aria-hidden="true">↗</span></button></div><span class="pixel-note" id="pixel-note">Smoothed display · source sampling shown in data details</span></div>
     </section>
 
-    <aside class="analyzer-panel card" aria-labelledby="analyzer-title">
+    <aside class="analyzer-panel screen-panel card" data-screen-panel="assistant" aria-labelledby="analyzer-title">
       <div class="panel-heading analyzer-heading">
         <div><div class="eyebrow">MISSION ASSISTANT</div><h2 id="analyzer-title"></h2></div>
         <span class="assistant-orb" aria-hidden="true">✦</span>
       </div>
+      <div class="assistant-status" id="assistant-mode-status">Grounded in the active target</div>
       <label class="sr-only" for="assistant-name">Assistant display name</label>
       <input class="assistant-name" id="assistant-name" maxlength="40" aria-label="Editable assistant name">
       <label class="sr-only" for="analyzer-token">Analyzer access token</label>
@@ -88,6 +131,7 @@
         <div class="chat-message assistant-message"><span class="message-author"></span><p>Choose a target and ask me what the observations reveal.</p></div>
       </div>
       <div id="suggested-question" class="suggested-question"></div>
+      <div class="assistant-activity" id="assistant-activity" aria-live="polite" hidden><span class="activity-pulse"></span> Analyzing the active target…</div>
       <form id="chat-form" class="chat-form">
         <label class="sr-only" for="chat-input">Ask SPHEREx Analyzer</label>
         <textarea id="chat-input" rows="2" maxlength="1000" placeholder="Ask about this target…" required></textarea>
@@ -96,15 +140,29 @@
       <p class="privacy-note">The access token is kept in this tab and sent only to your SPHEREx backend. Gemini receives only compact target metadata and recent chat turns; image pixels stay in this app.</p>
     </aside>
 
-    <section class="spectrum-panel card" aria-labelledby="spectrum-title">
+    <section class="spectrum-panel screen-panel card" data-screen-panel="spectrum" aria-labelledby="spectrum-title">
       <div class="panel-heading">
-        <div><div class="eyebrow">SPECTRAL DIAGNOSTICS</div><h2 id="spectrum-title">102-Band SED</h2></div>
-        <span class="pill">0.75–5.0 µm</span>
+        <div><div class="eyebrow">SPECTRAL DIAGNOSTICS · ARCHIVE MEASUREMENTS</div><h2 id="spectrum-title">Infrared measurements</h2></div>
+        <span class="pill" id="spectrum-source">WAITING FOR TARGET</span>
       </div>
-      <canvas id="spectrum-canvas" width="900" height="240" aria-label="102-band spectral energy distribution"></canvas>
-      <div class="spectrum-legend"><span><i class="legend-line"></i> Relative flux</span><span>H₂O · CH₄ · CO₂ diagnostic regions</span></div>
+      <div class="spectrum-summary" id="spectrum-summary"><span class="spectrum-stat"><small>WAVELENGTH COVERAGE</small><strong id="spectrum-coverage">Unavailable</strong></span><span class="spectrum-stat"><small>MEASURED POINTS</small><strong id="spectrum-channel-count">0</strong></span><span class="spectrum-stat"><small>HIGHEST FLUX</small><strong id="spectrum-peak">—</strong></span><span class="spectrum-stat"><small>ARRAYS COVERED</small><strong id="spectrum-array-count">0</strong></span><span class="spectrum-stat"><small>MEDIAN S/N</small><strong id="spectrum-snr">—</strong></span><span class="spectrum-stat"><small>MEASURED STRUCTURE</small><strong id="spectrum-feature-count">0</strong></span><span class="spectrum-stat"><small>SPECTRUM STATUS</small><strong id="spectrum-status">Awaiting target</strong></span><span class="spectrum-stat"><small>ACTIVE FIELD</small><strong id="spectrum-target-name">Awaiting target</strong></span></div>
+      <div class="spectrum-chart-wrap"><canvas id="spectrum-canvas" width="1100" height="340" aria-label="Archive spectral measurements plotted against wavelength"></canvas><div id="spectrum-tooltip" class="spectrum-tooltip" role="status" hidden></div></div>
+      <div id="feature-list" class="feature-list" aria-label="Measured spectral structure"></div>
+      <div class="spectrum-legend" id="spectrum-series-legend"><span>Each line is one observation epoch</span><span>Flux units follow the archive payload</span></div>
     </section>
   </main>
+  <dialog id="data-products-dialog" class="data-dialog" aria-labelledby="data-dialog-title">
+    <div class="dialog-head"><div><div class="eyebrow">PROVENANCE & FILE INSPECTION</div><h2 id="data-dialog-title">Data products</h2></div><button id="close-data-products" class="icon-button" type="button" aria-label="Close data products">×</button></div>
+    <div id="data-source-detail" class="data-source-detail"></div>
+    <div id="data-product-list" class="data-product-list"></div>
+    <div class="dialog-foot"><button id="refresh-archive" class="button button-secondary" type="button">Retry live archive lookup</button><span>Simulated products contain no imported FITS file.</span></div>
+  </dialog>
+  <dialog id="data-inspector-dialog" class="data-dialog data-inspector-dialog" aria-labelledby="data-inspector-title">
+    <div class="dialog-head"><div><div class="eyebrow">MEASUREMENTS & IMAGE INSPECTION</div><h2 id="data-inspector-title">Observation data</h2></div><button id="close-data-inspector" class="icon-button" type="button" aria-label="Close observation data">×</button></div>
+    <div id="data-inspector-summary" class="inspector-summary"></div>
+    <section class="inspector-section"><h3>Epoch image planes</h3><div class="inspector-table-wrap"><table class="inspector-table"><thead><tr><th>Epoch</th><th>UTC date</th><th>Grid</th><th>Pixel range</th><th>Arrays / background σ</th><th>Quality flags</th></tr></thead><tbody id="epoch-inspector-rows"></tbody></table></div></section>
+    <section class="inspector-section"><h3>Extracted wavelength and flux</h3><div class="inspector-table-wrap"><table class="inspector-table"><thead><tr><th>Epoch</th><th>Wavelength</th><th>Flux</th><th>Uncertainty</th><th>Bandpass</th></tr></thead><tbody id="spectrum-inspector-rows"></tbody></table></div><p class="inspector-empty" id="spectrum-inspector-empty" hidden>No target-position spectral measurements were returned for this field.</p></section>
+  </dialog>
   <footer>SPHEREx Mission Visualizer <span>·</span> Multi-epoch data exploration prototype</footer>
 </body>
 </html>
